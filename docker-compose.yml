@@ -1,0 +1,16 @@
+# Local dev database only. Not used in production — Cloud SQL takes over there
+# (see the Working Guide, Section 3).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: siteops
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: siteops
+    ports:
+      - "5432:5432"
+    volumes:
+      - siteops_pgdata:/var/lib/postgresql/data
+
+volumes:
+  siteops_pgdata:

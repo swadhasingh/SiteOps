@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Env / secrets
+.env
+
+# Node / frontend (added in Step 9)
+node_modules/
+frontend/dist/
+
+# Data (audio can be large; commit gold-label JSON, not raw audio)
+data/raw/*
+!data/raw/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+*.swp

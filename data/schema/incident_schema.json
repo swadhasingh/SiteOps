@@ -1,0 +1,87 @@
+{
+  "schema_version": "0.1",
+  "description": "Fixed 7-field incident schema. Every field written by the Extractor Agent must carry an evidence_status. The Clarification Agent uses clarification_question + input options for any field left NOT_PROVIDED. Never invent a value — see evidence_statuses.",
+
+  "evidence_statuses": {
+    "SUPPORTED": "The value is directly and clearly stated in the transcript.",
+    "NOT_PROVIDED": "The transcript does not mention this field. Leave value as null. Do not guess.",
+    "CONFLICTING": "The transcript contains contradictory information for this field. Flag for human review.",
+    "INFERRED": "The system reasoned this out rather than reading it directly. Must be clearly labeled as inferred, never presented as fact."
+  },
+
+  "fields": [
+    {
+      "name": "location",
+      "type": "string",
+      "required": true,
+      "extractor_hint": "Where on the site is this happening? e.g. 'Block B', 'Slab 3, East Wing'",
+      "clarification_question": "Where exactly is this happening?",
+      "input_type": "text"
+    },
+    {
+      "name": "issue",
+      "type": "string",
+      "required": true,
+      "extractor_hint": "One short phrase describing the problem, e.g. 'Equipment problem', 'Material shortage'",
+      "clarification_question": "What's the issue, in a few words?",
+      "input_type": "text"
+    },
+    {
+      "name": "equipment",
+      "type": "string",
+      "required": false,
+      "extractor_hint": "Name of the equipment involved, if any, e.g. 'Concrete Pump'",
+      "clarification_question": "Which equipment is involved, if any?",
+      "input_type": "text"
+    },
+    {
+      "name": "severity",
+      "type": "enum",
+      "options": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+      "required": true,
+      "extractor_hint": "Only set this if severity is stated or extremely obvious from context — otherwise leave NOT_PROVIDED and let the Clarification Agent ask.",
+      "clarification_question": "How severe is the situation?",
+      "input_type": "choice"
+    },
+    {
+      "name": "emergency",
+      "type": "enum",
+      "options": ["YES", "NO"],
+      "required": true,
+      "extractor_hint": "Only set this if explicitly stated or unmistakably implied (e.g. injury, fire, structural collapse).",
+      "clarification_question": "Is this an emergency?",
+      "input_type": "choice"
+    },
+    {
+      "name": "duration",
+      "type": "enum",
+      "options": ["<15 min", "15-30 min", "30-60 min", ">60 min"],
+      "required": false,
+      "extractor_hint": "How long has this been going on, if mentioned.",
+      "clarification_question": "Approximately how long has this been happening?",
+      "input_type": "choice"
+    },
+    {
+      "name": "impact",
+      "type": "enum",
+      "options": ["No impact", "Slowed work", "Work stopped"],
+      "required": false,
+      "extractor_hint": "Effect on ongoing work, if mentioned.",
+      "clarification_question": "What is the impact on work?",
+      "input_type": "choice"
+    }
+  ],
+
+  "example_gold_record": {
+    "transcript": "Block B mein concrete pump ka problem hai.",
+    "extracted": {
+      "location":  { "value": "Block B",            "evidence_status": "SUPPORTED" },
+      "issue":     { "value": "Equipment problem",   "evidence_status": "SUPPORTED" },
+      "equipment": { "value": "Concrete Pump",       "evidence_status": "SUPPORTED" },
+      "severity":  { "value": null,                  "evidence_status": "NOT_PROVIDED" },
+      "emergency": { "value": null,                  "evidence_status": "NOT_PROVIDED" },
+      "duration":  { "value": null,                  "evidence_status": "NOT_PROVIDED" },
+      "impact":    { "value": null,                  "evidence_status": "NOT_PROVIDED" }
+    }
+  }
+}
