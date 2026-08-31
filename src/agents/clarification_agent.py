@@ -1,13 +1,13 @@
 """
 Clarification Agent.
 
-Genuinely agentic responsibility: given which of the 7 fixed fields are
-still missing (evidence_status == NOT_PROVIDED) after Extraction and
-Verification, decide:
+Genuinely agentic responsibility: given which fields are still missing
+(value is None) after Extraction and Verification, decide:
 
   1. The ORDER to ask about them — context matters. A report that reads
-     as urgent should be asked about emergency/severity before duration
-     or impact, even though those come later in the schema's fixed list.
+     as urgent should be asked about severity before less urgent fields
+     like action_needed, even though those come later in the schema's
+     fixed field order.
   2. Whether two missing fields can be safely COMBINED into one natural
      question without confusing the person answering.
 
@@ -21,6 +21,19 @@ If the LLM call fails, returns malformed output, or is not configured at
 all, this falls back to the schema's default field order with no
 merging — degraded, but never broken. This fallback is also what makes
 the agent's core logic testable with zero API key and zero network call.
+
+NOTE on schema shape: data/schema/incident_schema.json currently stores
+"fields" as a DICT keyed by field name (e.g. {"category": {...}, ...}),
+matching what extractor_agent.py and verifier_agent.py already expect.
+This agent reads that same dict shape — do not change this to a list
+without also updating the other two agents, or you'll reintroduce the
+exact mismatch this file was patched to fix.
+
+NOTE on "missing": this agent determines a field is missing by checking
+whether its "value" is None on the combined Extractor+Verifier output —
+NOT by looking for an "evidence_status" key, which neither agent
+currently produces. If you later add a real evidence_status/CONFLICTING
+concept to the Verifier, update _missing_fields() to match.
 """
 
 import json
@@ -36,11 +49,16 @@ def _load_schema():
 
 
 def _missing_fields(extracted: dict, schema: dict) -> list:
-    """Return schema field-defs for every field whose evidence_status is NOT_PROVIDED."""
+    """Return field-defs (dict, with 'name' injected) for every field whose
+    value is None on the combined Extractor+Verifier output. 'extracted' is
+    expected to be verified_json (or draft_json) keyed by field name, each
+    value a dict with at least a "value" key."""
     missing = []
-    for field_def in schema["fields"]:
-        entry = extracted.get(field_def["name"], {})
-        if entry.get("evidence_status") == "NOT_PROVIDED":
+    for field_name, field_spec in schema["fields"].items():
+        entry = extracted.get(field_name, {})
+        if entry.get("value") is None:
+            field_def = dict(field_spec)
+            field_def["name"] = field_name
             missing.append(field_def)
     return missing
 
@@ -61,7 +79,7 @@ You will be given:
 - for each missing field: its clarification question, input type, and options (if any)
 
 Your ONLY job is to decide:
-1. The best ORDER to ask about these missing fields, given the transcript's context. If the transcript sounds urgent or hints at danger, injury, or a full work stoppage, ask about emergency/severity-type fields before less urgent ones like duration.
+1. The best ORDER to ask about these missing fields, given the transcript's context. If the transcript sounds urgent or hints at danger, injury, or a full work stoppage, ask about severity-type fields before less urgent ones like action_needed.
 2. Whether any TWO missing fields can be combined into ONE natural, non-confusing question. Only combine two fields if both are simple choice-type fields (input_type "choice"). Never combine a free-text field with anything, and never combine more than 2 fields into one question.
 
 Do NOT invent, guess, or fill in a value for any field. You only sequence and phrase questions — never answer them.
@@ -75,8 +93,10 @@ Every missing field must appear in exactly one step. Output no text outside the 
 
 def decide_clarifications(extracted: dict, transcript: str, llm_call=None) -> list:
     """
-    extracted: dict of {field_name: {"value": ..., "evidence_status": ...}}
-               — this is the Extractor + Verifier agents' combined output.
+    extracted: dict of {field_name: {"value": ..., ...}} — this is the
+               Extractor + Verifier agents' combined output (draft_json or
+               verified_json). A field counts as missing if its "value" is
+               None.
     transcript: the original transcript text.
     llm_call: callable(system_prompt, user_prompt) -> raw text.
               Pass None to force the deterministic fallback — this is how
@@ -84,7 +104,7 @@ def decide_clarifications(extracted: dict, transcript: str, llm_call=None) -> li
               network call.
 
     Returns: ordered list of clarification steps, e.g.
-      [{"fields": ["emergency", "severity"], "question": "...", "reasoning": "..."}]
+      [{"fields": ["severity"], "question": "...", "reasoning": "..."}]
     """
     schema = _load_schema()
     missing = _missing_fields(extracted, schema)
@@ -148,6 +168,37 @@ def make_anthropic_llm_call(api_key: str = None, model: str = "claude-haiku-4-5-
             messages=[{"role": "user", "content": user_prompt}],
         )
         return response.content[0].text
+
+    return call
+
+
+def make_groq_llm_call(api_key: str = None, model: str = "openai/gpt-oss-120b"):
+    """
+    Returns a callable(system_prompt, user_prompt) -> str wired to the real
+    Groq API — the same provider extractor_agent.py and verifier_agent.py
+    already use, so this needs no new API key if GROQ_API_KEY is already
+    set in your .env.
+    """
+    import requests
+
+    key = api_key or os.environ["GROQ_API_KEY"]
+
+    def call(system_prompt: str, user_prompt: str) -> str:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
 
     return call
 
