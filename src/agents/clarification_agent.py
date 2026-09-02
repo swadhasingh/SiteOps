@@ -22,18 +22,33 @@ all, this falls back to the schema's default field order with no
 merging — degraded, but never broken. This fallback is also what makes
 the agent's core logic testable with zero API key and zero network call.
 
-NOTE on schema shape: data/schema/incident_schema.json currently stores
-"fields" as a DICT keyed by field name (e.g. {"category": {...}, ...}),
-matching what extractor_agent.py and verifier_agent.py already expect.
-This agent reads that same dict shape — do not change this to a list
-without also updating the other two agents, or you'll reintroduce the
-exact mismatch this file was patched to fix.
+--- EMERGENCY HANDLING (hard-coded priority, bypasses the LLM) ---
 
-NOTE on "missing": this agent determines a field is missing by checking
-whether its "value" is None on the combined Extractor+Verifier output —
-NOT by looking for an "evidence_status" key, which neither agent
-currently produces. If you later add a real evidence_status/CONFLICTING
-concept to the Verifier, update _missing_fields() to match.
+"emergency" and, once confirmed yes, "reporter_name" are handled OUTSIDE
+the normal ordering logic entirely. If either is missing, it is asked
+first (emergency), then second (reporter_name), unconditionally — never
+merged with anything, never left to LLM discretion, never affected by an
+API outage. This is deliberate: emergency detection and the false-alarm
+check (knowing who is reporting it) are safety-critical and must not be
+delayed or reordered by a network call that might fail, be slow, or
+(rarely) make a bad judgment call. Only once both are resolved (or
+weren't missing to begin with) does the normal ordering/merging logic
+run on whatever fields remain.
+
+NOTE on schema shape: data/schema/incident_schema.json stores "fields"
+as a DICT keyed by field name, matching what extractor_agent.py and
+verifier_agent.py already expect. This agent reads that same dict shape.
+
+NOTE on conditional fields: a field may carry a "conditional_on":
+{"field": "X", "value": "Y"} entry, meaning it should only be treated as
+"missing" once field X's current value equals Y. Right now the only such
+field is reporter_name (conditional on emergency == "yes") — asking for
+a reporter's name on every calm, routine incident would be unnecessary
+friction; it's only collected when it actually matters.
+
+NOTE on "missing": a field counts as missing by checking whether its
+"value" is None on the combined Extractor+Verifier output — NOT by
+looking for an "evidence_status" key, which neither agent produces.
 """
 
 import json
@@ -42,25 +57,60 @@ from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "data" / "schema" / "incident_schema.json"
 
+# Fixed priority order — always asked first, in this order, never merged,
+# never subject to LLM discretion. See module docstring.
+PRIORITY_FIELDS = ["emergency", "reporter_name"]
+
 
 def _load_schema():
     with open(SCHEMA_PATH) as f:
         return json.load(f)
 
 
+def _condition_met(field_spec: dict, extracted: dict) -> bool:
+    """A field with no conditional_on is always relevant. A field WITH one
+    is only relevant once the referenced field's current value matches."""
+    cond = field_spec.get("conditional_on")
+    if cond is None:
+        return True
+    ref_value = extracted.get(cond["field"], {}).get("value")
+    return ref_value == cond["value"]
+
+
 def _missing_fields(extracted: dict, schema: dict) -> list:
-    """Return field-defs (dict, with 'name' injected) for every field whose
-    value is None on the combined Extractor+Verifier output. 'extracted' is
-    expected to be verified_json (or draft_json) keyed by field name, each
-    value a dict with at least a "value" key."""
+    """Return field-defs (dict, with 'name' injected) for every field that
+    is currently relevant (see _condition_met) AND whose value is None."""
     missing = []
     for field_name, field_spec in schema["fields"].items():
+        if not _condition_met(field_spec, extracted):
+            continue
         entry = extracted.get(field_name, {})
         if entry.get("value") is None:
             field_def = dict(field_spec)
             field_def["name"] = field_name
             missing.append(field_def)
     return missing
+
+
+def _priority_steps(missing_fields: list) -> tuple:
+    """Pulls emergency/reporter_name out of the missing list, in fixed
+    order, as their own single-field steps. Returns (priority_steps,
+    remaining_missing_fields) — the caller runs normal ordering logic
+    only on what's left."""
+    by_name = {f["name"]: f for f in missing_fields}
+    steps = []
+    for name in PRIORITY_FIELDS:
+        if name in by_name:
+            f = by_name[name]
+            steps.append({
+                "fields": [name],
+                "question": f["clarification_question"],
+                "reasoning": f"hard-coded priority: '{name}' is asked immediately, "
+                             f"never merged, and never left to LLM ordering — safety-"
+                             f"critical fields must not depend on an API call succeeding.",
+            })
+    remaining = [f for f in missing_fields if f["name"] not in PRIORITY_FIELDS]
+    return steps, remaining
 
 
 def _fallback_order(missing_fields: list, reason: str = "fallback: schema default order, LLM unavailable") -> list:
@@ -95,16 +145,20 @@ def decide_clarifications(extracted: dict, transcript: str, llm_call=None) -> li
     """
     extracted: dict of {field_name: {"value": ..., ...}} — this is the
                Extractor + Verifier agents' combined output (draft_json or
-               verified_json). A field counts as missing if its "value" is
-               None.
+               verified_json), PLUS any answers already folded in from
+               earlier clarification steps in this same incident's flow.
+               A field counts as missing if its "value" is None (and, for
+               conditional fields, its condition is currently met).
     transcript: the original transcript text.
     llm_call: callable(system_prompt, user_prompt) -> raw text.
-              Pass None to force the deterministic fallback — this is how
-              the agent's core logic is tested with no API key and no
-              network call.
+              Pass None to force the deterministic fallback for non-priority
+              fields — this is how the agent's core logic is tested with no
+              API key and no network call. Priority fields (emergency,
+              reporter_name) NEVER go through llm_call regardless.
 
-    Returns: ordered list of clarification steps, e.g.
-      [{"fields": ["severity"], "question": "...", "reasoning": "..."}]
+    Returns: ordered list of clarification steps. Call this again after
+    each answer is folded into `extracted` — e.g. once emergency flips to
+    "yes", reporter_name will newly appear as missing on the next call.
     """
     schema = _load_schema()
     missing = _missing_fields(extracted, schema)
@@ -112,8 +166,13 @@ def decide_clarifications(extracted: dict, transcript: str, llm_call=None) -> li
     if not missing:
         return []
 
+    priority_steps, remaining = _priority_steps(missing)
+
+    if not remaining:
+        return priority_steps
+
     if llm_call is None:
-        return _fallback_order(missing)
+        return priority_steps + _fallback_order(remaining)
 
     user_prompt = json.dumps({
         "transcript": transcript,
@@ -124,7 +183,7 @@ def decide_clarifications(extracted: dict, transcript: str, llm_call=None) -> li
                 "input_type": f["input_type"],
                 "options": f.get("options"),
             }
-            for f in missing
+            for f in remaining
         ],
     }, indent=2)
 
@@ -132,44 +191,20 @@ def decide_clarifications(extracted: dict, transcript: str, llm_call=None) -> li
         raw = llm_call(CLARIFICATION_SYSTEM_PROMPT, user_prompt)
         steps = json.loads(raw)
 
-        # Safety check: every missing field must be covered exactly once.
-        # If the model drops or duplicates a field, we don't trust the output.
+        # Safety check: every remaining (non-priority) field must be covered
+        # exactly once. If the model drops or duplicates a field, or tries to
+        # sneak a priority field back into a merge, we don't trust the output.
         covered = set()
         for step in steps:
             covered.update(step["fields"])
-        expected = {f["name"] for f in missing}
+        expected = {f["name"] for f in remaining}
         if covered != expected:
-            raise ValueError(f"LLM output did not cover exactly the missing fields: got {covered}, expected {expected}")
+            raise ValueError(f"LLM output did not cover exactly the remaining fields: got {covered}, expected {expected}")
 
-        return steps
+        return priority_steps + steps
     except Exception as e:
         # Never let a bad or failed LLM call break the clarification flow.
-        return _fallback_order(missing, reason=f"fallback: LLM output rejected ({e})")
-
-
-def make_anthropic_llm_call(api_key: str = None, model: str = "claude-haiku-4-5-20251001"):
-    """
-    Returns a callable(system_prompt, user_prompt) -> str wired to the real
-    Anthropic API. Kept separate from decide_clarifications() so the core
-    ordering/merging logic above stays testable without any network call.
-
-    Anthropic has no free tier — this requires a billed API key. Use
-    make_gemini_llm_call() below instead if you want zero-cost testing.
-    """
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=api_key or os.environ.get("LLM_API_KEY"))
-
-    def call(system_prompt: str, user_prompt: str) -> str:
-        response = client.messages.create(
-            model=model,
-            max_tokens=500,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        return response.content[0].text
-
-    return call
+        return priority_steps + _fallback_order(remaining, reason=f"fallback: LLM output rejected ({e})")
 
 
 def make_groq_llm_call(api_key: str = None, model: str = "openai/gpt-oss-120b"):
@@ -199,6 +234,32 @@ def make_groq_llm_call(api_key: str = None, model: str = "openai/gpt-oss-120b"):
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
+
+    return call
+
+
+def make_anthropic_llm_call(api_key: str = None, model: str = "claude-haiku-4-5-20251001"):
+    """
+    Returns a callable(system_prompt, user_prompt) -> str wired to the real
+    Anthropic API. Kept separate from decide_clarifications() so the core
+    ordering/merging logic above stays testable without any network call.
+
+    Anthropic has no free tier — this requires a billed API key. Use
+    make_gemini_llm_call() or make_groq_llm_call() below instead for
+    zero-cost testing.
+    """
+    from anthropic import Anthropic
+
+    client = Anthropic(api_key=api_key or os.environ.get("LLM_API_KEY"))
+
+    def call(system_prompt: str, user_prompt: str) -> str:
+        response = client.messages.create(
+            model=model,
+            max_tokens=500,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text
 
     return call
 

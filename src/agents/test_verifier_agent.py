@@ -2,13 +2,17 @@
 Standalone test for the Verifier Agent. Runs the Extractor first (live), then
 feeds its output into the Verifier, so you see the two agents working together
 exactly as the orchestrator will chain them later.
+
+Run from the project root:
+  python -m src.agents.test_verifier_agent
+  python -m src.agents.test_verifier_agent --live --provider groq
 """
 
 import argparse
 import json
-from extractor_agent import extract, INCIDENT_SCHEMA
-from verifier_agent import verify
 import time
+from src.agents.extractor_agent import extract, INCIDENT_SCHEMA
+from src.agents.verifier_agent import verify
 
 TEST_TRANSCRIPTS = [
     "cement bag torn near block C, 2 bags wasted, need someone to clean it up",
@@ -40,9 +44,12 @@ if __name__ == "__main__":
         print(json.dumps(verified, indent=2, ensure_ascii=False))
 
         # Quick human-readable summary
-        unverified = [f for f, d in verified.items()
-                      if isinstance(d, dict) and d.get("verified") is False]
-        if unverified:
-            print(f"\n⚠️  FLAGGED FIELDS: {unverified}")
+        if verified.get("_fallback"):
+            print("\n⚠️  FALLBACK — the Extractor's live call failed, so nothing was actually extracted or verified (likely rate-limited).")
         else:
-            print("\n✅ All fields passed verification.")
+            unverified = [f for f, d in verified.items()
+                          if isinstance(d, dict) and d.get("verified") is False]
+            if unverified:
+                print(f"\n⚠️  FLAGGED FIELDS: {unverified}")
+            else:
+                print("\n✅ All fields passed verification.")

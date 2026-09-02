@@ -1,11 +1,15 @@
 """
 Standalone test for the Extractor Agent. Run without --live to confirm the
 fallback path never crashes. Run with --live to actually call the LLM.
+
+Run from the project root:
+  python -m src.agents.test_extractor_agent
+  python -m src.agents.test_extractor_agent --live --provider groq
 """
 
 import argparse
 import json
-from extractor_agent import extract
+from src.agents.extractor_agent import extract
 
 SAMPLE_TRANSCRIPTS = [
     "cement bag torn near block C, 2 bags wasted, need someone to clean it up",
@@ -27,4 +31,4 @@ if __name__ == "__main__":
         print(f"\n=== Test case {i} ===")
         print(f"Transcript: {transcript}")
         result = extract(transcript, provider=args.provider, live=args.live)
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2, ensure_ascii=False))

@@ -36,6 +36,23 @@
       "clarification_question": "What needs to happen next?",
       "input_type": "text",
       "options": null
+    },
+    "emergency": {
+      "type": "string",
+      "enum": ["yes", "no"],
+      "description": "Whether this requires immediate emergency attention — life-threatening danger, serious injury, active fire/collapse/electrocution risk — not just any incident, however serious-sounding",
+      "clarification_question": "Is this an emergency requiring immediate attention right now?",
+      "input_type": "choice",
+      "options": ["yes", "no"]
+    },
+    "reporter_name": {
+      "type": "string",
+      "description": "Name of the person reporting the incident. Collected only to prevent false emergency alarms before notifying management — never inferred from the transcript, always asked directly.",
+      "clarification_question": "What is your name, in case we need to follow up right away?",
+      "input_type": "text",
+      "options": null,
+      "never_extract": true,
+      "conditional_on": {"field": "emergency", "value": "yes"}
     }
   }
 }
