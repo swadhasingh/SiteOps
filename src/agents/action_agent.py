@@ -134,7 +134,8 @@ def call_gemini_route(category, severity, description) -> dict:
     return _parse_routing_json(content)
 
 
-def route(verified_json: dict, provider: str = "groq", live: bool = False) -> dict:
+def route(verified_json: dict, provider: str = "groq", live: bool = False,
+          skip_escalation: bool = False) -> dict:
     """
     Main entry point. Takes verified_json (Extractor+Verifier+Clarification-
     filled combined record) and returns:
@@ -170,7 +171,7 @@ def route(verified_json: dict, provider: str = "groq", live: bool = False) -> di
     emergency = verified_json.get("emergency", {}).get("value")
     reporter_name = verified_json.get("reporter_name", {}).get("value")
     escalation = None
-    if emergency == "yes" and reporter_name:
+    if emergency == "yes" and reporter_name and not skip_escalation:
         escalation = send_emergency_escalation(verified_json, routing)
 
     routing["escalation"] = escalation
