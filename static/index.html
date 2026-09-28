@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiteOps Voice Agent</title>
+<style>
+  :root{
+    --navy:#0E2A45; --navy-dark:#081A2C; --steel:#3D4E64;
+    --coral:#D9603C; --coral-dark:#B84A2C; --coral-bg:#FCEBE3;
+    --paper:#F4F6F8; --ink:#161B22;
+    --line:#DEE3EA; --amber:#B8860B; --amber-bg:#FFF6E0; --red:#8C1D18; --red-bg:#FBEAE9;
+    --green:#255C3F; --green-bg:#E9F3EC;
+    --mono:"IBM Plex Mono", "SF Mono", Consolas, monospace;
+    --sans:-apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--paper); color:var(--ink);
+    font-family:var(--sans);
+    display:flex; flex-direction:column; align-items:center;
+  }
+  header{
+    width:100%; background:var(--navy); color:#fff; padding:18px 24px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:relative; overflow:hidden;
+    box-shadow:0 2px 10px rgba(14,42,69,0.25);
+  }
+  header::before{
+    content:""; position:absolute; inset:0;
+    background-image:repeating-linear-gradient(115deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 34px);
+    pointer-events:none;
+  }
+  header::after{
+    content:""; position:absolute; left:0; right:0; bottom:0; height:3px;
+    background:linear-gradient(90deg, var(--coral), var(--coral-dark));
+  }
+  header > *{position:relative; z-index:1}
+  header .brand{font-size:19px; font-weight:700; letter-spacing:0.2px}
+  header .brand .tagline{display:block; font-weight:400; font-size:12.5px; color:#AEBBCC; margin-top:3px; letter-spacing:0.15px}
+  header .who{font-size:13px; text-align:right; color:#DCE3EF}
+  header .who .role-pill{
+    display:inline-block; background:rgba(217,96,60,0.22); color:#FFD9C8;
+    border:1px solid rgba(217,96,60,0.55); font-weight:700; font-size:10.5px;
+    letter-spacing:0.6px; text-transform:uppercase; padding:2px 9px; border-radius:20px;
+    margin-right:7px; vertical-align:middle;
+  }
+  header .who button{
+    background:none; border:none; color:#AEBBCC; text-decoration:underline;
+    font-size:12px; cursor:pointer; padding:0; margin-top:5px;
+  }
+  header .who button:hover{color:#fff}
+  main{width:100%; max-width:680px; padding:24px 20px 30px}
+  .card{
+    background:#fff; border:1px solid var(--line); border-radius:10px;
+    padding:26px 24px; margin-bottom:16px;
+    box-shadow:0 1px 2px rgba(15,25,40,0.04);
+  }
+  h1{font-size:21px; margin:0 0 6px; font-weight:700; letter-spacing:-0.1px}
+  h2{
+    font-size:12.5px; margin:0 0 14px; font-weight:700; color:var(--navy);
+    text-transform:uppercase; letter-spacing:0.6px;
+  }
+  p.hint{color:#5B6472; font-size:14.5px; margin:0 0 20px; line-height:1.55}
+  label{display:block; font-size:13px; font-weight:700; color:#3A4250; margin-bottom:7px; text-transform:uppercase; letter-spacing:0.3px}
+  textarea, input[type=text], select{
+    width:100%; font-size:16px; padding:12px 13px; border:1.5px solid var(--line);
+    border-radius:7px; font-family:inherit; background:#fff; color:var(--ink);
+    transition:border-color 0.12s ease;
+  }
+  textarea{min-height:96px; resize:vertical}
+  textarea:focus, input:focus, select:focus{outline:none; border-color:var(--coral); box-shadow:0 0 0 3px var(--coral-bg)}
+  .field{margin-bottom:18px}
+  .btn{
+    appearance:none; border:none; border-radius:7px; padding:13px 22px;
+    font-size:15.5px; font-weight:700; cursor:pointer; width:100%;
+    transition:background-color 0.12s ease, transform 0.05s ease;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--coral); color:#fff}
+  .btn-primary:hover{background:var(--coral-dark)}
+  .btn-primary:disabled{background:#C7B2A9; cursor:not-allowed}
+  .btn-row{display:flex; gap:10px; margin-top:6px}
+  .btn-approve{background:var(--green); color:#fff}
+  .btn-approve:hover{background:#1B4630}
+  .btn-reject{background:var(--red); color:#fff}
+  .btn-reject:hover{background:#6E140F}
+  .btn-edit{background:#fff; color:var(--navy); border:1.5px solid var(--navy)}
+  .btn-edit:hover{background:#F0F3F7}
+  .btn-ghost{background:#fff; color:var(--navy); border:1.5px solid var(--line); font-weight:700}
+  .btn-ghost:hover{border-color:var(--navy)}
+  .pending-banner{
+    width:100%; text-align:center; padding:14px; border-radius:7px;
+    font-size:15.5px; font-weight:700; letter-spacing:0.2px;
+  }
+  .pending-approve{background:var(--green-bg); color:var(--green)}
+  .pending-reject{background:var(--red-bg); color:var(--red)}
+  .pending-neutral{background:#E7ECF4; color:var(--navy)}
+  .badge{
+    display:inline-block; font-size:11px; font-weight:700; letter-spacing:0.5px;
+    text-transform:uppercase; padding:4px 11px; border-radius:20px; margin-bottom:14px;
+  }
+  .badge-progress{background:#E7ECF4; color:var(--navy)}
+  .badge-emergency{background:var(--red-bg); color:var(--red); animation:pulse-emergency 1.8s ease-in-out infinite}
+  @keyframes pulse-emergency{0%,100%{box-shadow:0 0 0 0 rgba(140,29,24,0.0)} 50%{box-shadow:0 0 0 5px rgba(140,29,24,0.08)}}
+  .badge-done{background:var(--green-bg); color:var(--green)}
+  .badge-rejected{background:var(--red-bg); color:var(--red)}
+  .field-list{border-top:1px solid var(--line); margin-top:4px}
+  .field-row{
+    display:flex; justify-content:space-between; gap:14px; padding:11px 0;
+    border-bottom:1px solid var(--line); font-size:14.5px;
+  }
+  .field-row .k{color:#5B6472; flex-shrink:0}
+  .field-row .v{font-weight:600; text-align:right}
+  .v.empty{color:#A9B2C0; font-weight:500; font-style:italic}
+  .routing-box{
+    background:var(--amber-bg); border:1px solid #E8D4A0; border-radius:8px;
+    padding:14px 16px; margin:16px 0; font-size:14.5px;
+  }
+  .routing-box b{color:var(--amber)}
+  .escalation-box{
+    background:#F0F2F5; border-radius:8px; padding:12px 15px; margin:10px 0 16px;
+    font-family:var(--mono); font-size:12.5px; color:#4A5262; line-height:1.7;
+  }
+  .error-box{
+    background:var(--red-bg); color:var(--red); border-radius:8px;
+    padding:12px 15px; font-size:14px; margin-bottom:16px; display:none;
+  }
+  .footer-note{color:#9AA3B0; font-size:12px; text-align:center; margin-top:6px; padding-bottom:26px}
+  .footer-note .dot{margin:0 6px; color:#C6CCD5}
+  .id-tag{font-family:var(--mono); font-size:12px; color:#8A93A2}
+  select{appearance:none; background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%235B6472" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>'); background-repeat:no-repeat; background-position:right 12px center; padding-right:34px}
+
+  /* Role gate */
+  .role-options{display:flex; gap:14px; flex-wrap:wrap}
+  .role-card{
+    flex:1; min-width:220px; border:1.5px solid var(--line); border-radius:10px;
+    padding:22px 18px; cursor:pointer; background:#fff; text-align:left;
+    border-top:3px solid var(--line); transition:border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .role-card:hover{border-color:var(--coral); border-top-color:var(--coral); box-shadow:0 4px 14px rgba(217,96,60,0.14)}
+  .role-card .emoji{font-size:26px; margin-bottom:8px}
+  .role-card h3{margin:0 0 6px; font-size:16px}
+  .role-card p{margin:0; font-size:13.5px; color:#5B6472}
+
+  /* Shell: top bar with nav / menu */
+  .topbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px}
+  .topbar .ident{font-size:13.5px; color:#5B6472}
+  .topbar .ident b{color:var(--ink)}
+  .topbar button.linklike{background:none;border:none;color:var(--navy);text-decoration:underline;font-size:13px;cursor:pointer;padding:0}
+  .nav-tabs{display:flex; gap:8px; margin-bottom:18px}
+  .nav-tab{
+    flex:1; padding:11px; text-align:center; border-radius:7px; font-size:13.5px;
+    font-weight:700; cursor:pointer; background:#fff; border:1.5px solid var(--line); color:#5B6472;
+    text-transform:uppercase; letter-spacing:0.3px; transition:all 0.12s ease;
+  }
+  .nav-tab:hover{border-color:var(--navy); color:var(--navy)}
+  .nav-tab.active{background:var(--navy); color:#fff; border-color:var(--navy)}
+
+  /* Menu cards (worker home) */
+  .menu-options{display:flex; flex-direction:column; gap:12px}
+  .menu-card{
+    display:flex; align-items:center; gap:14px; padding:18px 20px; border-radius:10px;
+    border:1.5px solid var(--line); border-left:3px solid var(--line);
+    background:#fff; cursor:pointer; text-align:left; transition:all 0.12s ease;
+  }
+  .menu-card:hover{border-color:var(--coral); border-left-color:var(--coral); box-shadow:0 4px 14px rgba(217,96,60,0.1)}
+  .menu-card .emoji{font-size:22px}
+  .menu-card h3{margin:0 0 3px; font-size:15.5px}
+  .menu-card p{margin:0; font-size:13px; color:#5B6472}
+
+  /* Lists (pending / history / my reports) */
+  .list-item{
+    border:1px solid var(--line); border-radius:9px; padding:14px 16px; margin-bottom:10px;
+    display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
+    background:#fff; transition:box-shadow 0.12s ease;
+  }
+  .list-item:hover{box-shadow:0 2px 8px rgba(15,25,40,0.06)}
+  .list-item .meta{font-size:13px; color:#5B6472; margin-top:3px}
+  .list-item .title{font-weight:700; font-size:14.5px}
+  .list-item .right{display:flex; align-items:center; gap:10px; flex-shrink:0}
+  .mini-btn{
+    background:var(--navy); color:#fff; border:none; border-radius:6px;
+    padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap;
+  }
+  .mini-btn:hover{background:var(--navy-dark)}
+  .empty-state{color:#8A93A2; font-size:14px; text-align:center; padding:30px 0}
+
+  /* Dashboard stat cards */
+  .stat-grid{display:flex; gap:12px; margin-bottom:22px; flex-wrap:wrap}
+  .stat-card{
+    flex:1; min-width:110px; background:#fff; border:1px solid var(--line);
+    border-top:3px solid var(--coral); border-radius:9px; padding:16px;
+  }
+  .stat-card .num{font-size:28px; font-weight:800; color:var(--navy); letter-spacing:-0.5px}
+  .stat-card .lbl{font-size:12px; color:#5B6472; margin-top:2px; text-transform:uppercase; letter-spacing:0.3px}
+  .bar-row{margin-bottom:12px}
+  .bar-row .bar-label{display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px}
+  .bar-row .bar-label span:first-child{text-transform:capitalize; font-weight:600; color:#3A4250}
+  .bar-row .bar-label span:last-child{font-weight:700; color:var(--ink)}
+  .bar-track{background:#EEF1F5; border-radius:5px; height:9px; overflow:hidden}
+  .bar-fill{height:100%; border-radius:5px; background:var(--navy)}
+
+  /* Partnership footer, shown site-wide */
+  .partner-note{
+    width:100%; text-align:center; padding:16px 20px 22px; color:#9AA3B0; font-size:11.5px;
+    letter-spacing:0.2px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">SiteOps Voice Agent<span class="tagline" id="idTag">Construction site incident reporting</span></div>
+  <div class="who" id="whoBox"></div>
+</header>
+
+<main id="app"></main>
+<div class="partner-note">In partnership with LTM — A Larsen &amp; Toubro Group Company</div>
+
+<script>
+const API = "";
+
+// ---- Schema: which fields get a dropdown, and their options ------------
+const FIELD_META = {
+  category:  { label: "Type of incident", kind: "select", options: [
+    ["safety_hazard","Safety hazard"], ["material_damage","Material damage"],
+    ["equipment_issue","Equipment issue"], ["delay","Delay"],
+    ["quality_issue","Quality issue"], ["other","Other"] ] },
+  severity:  { label: "How severe is it", kind: "select", options: [
+    ["low","Low"], ["medium","Medium"], ["high","High"], ["critical","Critical"] ] },
+  emergency: { label: "Is this an emergency", kind: "select", options: [
+    ["yes","Yes — needs immediate attention"], ["no","No"] ] },
+  location:      { label: "Where on site did this happen", kind: "text" },
+  description:   { label: "What happened", kind: "text" },
+  action_needed: { label: "Anything you'd suggest, if you have a thought? (optional)", kind: "text" },
+  reporter_name: { label: "Your name", kind: "text" },
+};
+const OPTIONAL_FIELDS = ["action_needed"];
+
+// ---- Global session state (lightweight — NOT real auth) -----------------
+let role = null;          // 'worker' | 'manager'
+let identity = {};        // worker: {name, employeeId}; manager: {name}
+let incidentId = null;
+let currentState = null;
+let workerScreen = "menu"; // 'menu' | 'report' | 'myreports'
+let managerTab = "pending"; // 'pending' | 'dashboard' | 'history'
+let reviewingId = null;    // set when a manager opens one pending item
+
+// ---- Helpers --------------------------------------------------------
+function el(html){ const d = document.createElement("div"); d.innerHTML = html.trim(); return d.firstElementChild; }
+function esc(s){ return (s ?? "").toString().replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function newIncidentId(){ return "inc-" + Date.now().toString(36); }
+function fmtDate(iso){ if(!iso) return ""; try { return new Date(iso).toLocaleString(); } catch(e){ return iso; } }
+
+async function api(path, body){
+  const res = await fetch(API + path, {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || ("Request failed (" + res.status + ")"));
+  return data;
+}
+async function apiGet(path){
+  const res = await fetch(API + path);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || ("Request failed (" + res.status + ")"));
+  return data;
+}
+
+function saveSession(){
+  try {
+    sessionStorage.setItem("siteops_role", role || "");
+    sessionStorage.setItem("siteops_identity", JSON.stringify(identity || {}));
+  } catch(e){}
+}
+function loadSession(){
+  try {
+    const r = sessionStorage.getItem("siteops_role");
+    const idt = sessionStorage.getItem("siteops_identity");
+    if (r) role = r;
+    if (idt) identity = JSON.parse(idt);
+  } catch(e){}
+}
+function switchRole(){
+  role = null; identity = {}; incidentId = null; currentState = null;
+  workerScreen = "menu"; managerTab = "pending"; reviewingId = null;
+  try { sessionStorage.removeItem("siteops_role"); sessionStorage.removeItem("siteops_identity"); } catch(e){}
+  render();
+}
+
+function updateHeader(){
+  const who = document.getElementById("whoBox");
+  const idTag = document.getElementById("idTag");
+  if (!role) { who.innerHTML = ""; idTag.textContent = "SiteOps Voice Agent"; return; }
+  if (role === "worker") {
+    who.innerHTML = `<span class="role-pill">Worker</span>${esc(identity.name)} (ID: ${esc(identity.employeeId)})<br><button onclick="switchRole()">Switch role</button>`;
+    idTag.textContent = "Reporting an incident";
+  } else {
+    who.innerHTML = `<span class="role-pill">Manager</span>${esc(identity.name)}<br><button onclick="switchRole()">Switch role</button>`;
+    idTag.textContent = "Reviewing incidents";
+  }
+}
+
+// =========================================================================
+// ROLE GATE
+// =========================================================================
+function renderRoleGate(){
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  app.appendChild(el(`
+    <div class="card">
+      <h1>Who's using this?</h1>
+      <p class="hint">This is a lightweight session check for this demo, not a secure login — it just decides which screen you see.</p>
+      <div class="role-options">
+        <div class="role-card" id="pickWorker">
+          <div class="emoji">🧑‍🔧</div>
+          <h3>I'm reporting an incident</h3>
+          <p>File a report and see your own past reports.</p>
+        </div>
+        <div class="role-card" id="pickManager">
+          <div class="emoji">🗂️</div>
+          <h3>Manager - reviewing reports</h3>
+          <p>See what's waiting, a site dashboard, and history.</p>
+        </div>
+      </div>
+    </div>
+  `));
+  document.getElementById("pickWorker").onclick = () => renderIdentityForm("worker");
+  document.getElementById("pickManager").onclick = () => renderIdentityForm("manager");
+}
+
+function renderIdentityForm(pickedRole){
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  const isWorker = pickedRole === "worker";
+  app.appendChild(el(`
+    <div class="card">
+      <h1>${isWorker ? "Reporter details" : "Reviewer details"}</h1>
+      <p class="hint">${isWorker
+        ? "Your employee ID is only shown to managers, for accountability. Other workers never see it."
+        : "Your name will be recorded against every decision you make."}</p>
+      <div class="error-box" id="errBox"></div>
+      <div class="field">
+        <label>Your name</label>
+        <input type="text" id="idName" placeholder="e.g. Swadha Singh">
+      </div>
+      ${isWorker ? `<div class="field"><label>Employee ID</label><input type="text" id="idEmpId" placeholder="e.g. EMP1042"></div>` : ""}
+      <button class="btn btn-primary" id="idContinue">Continue</button>
+    </div>
+  `));
+  document.getElementById("idContinue").onclick = () => {
+    const name = document.getElementById("idName").value.trim();
+    const empId = isWorker ? document.getElementById("idEmpId").value.trim() : null;
+    const errBox = document.getElementById("errBox");
+    if (!name || (isWorker && !empId)) {
+      errBox.textContent = "Please fill in every field.";
+      errBox.style.display = "block";
+      return;
+    }
+    role = pickedRole;
+    identity = isWorker ? { name, employeeId: empId } : { name };
+    workerScreen = "menu"; managerTab = "pending";
+    saveSession();
+    render();
+  };
+}
+
+// =========================================================================
+// WORKER SHELL
+// =========================================================================
+function renderWorkerShell(){
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+
+  if (workerScreen === "menu") {
+    app.appendChild(el(`
+      <div class="menu-options">
+        <div class="menu-card" id="goReport">
+          <div class="emoji">📝</div>
+          <div><h3>File a new report</h3><p>Type or describe what happened, in English or Hinglish.</p></div>
+        </div>
+        <div class="menu-card" id="goMyReports">
+          <div class="emoji">📋</div>
+          <div><h3>My reports</h3><p>See the status of incidents you've filed.</p></div>
+        </div>
+      </div>
+    `));
+    document.getElementById("goReport").onclick = () => { workerScreen = "report"; incidentId = null; currentState = null; render(); };
+    document.getElementById("goMyReports").onclick = () => { workerScreen = "myreports"; render(); loadMyReports(); };
+    return;
+  }
+
+  if (workerScreen === "myreports") {
+    app.appendChild(el(`
+      <div>
+        <button class="btn btn-ghost" style="width:auto;margin-bottom:14px" id="backToMenu">&larr; Back</button>
+        <div class="card"><h1>My reports</h1><div id="myReportsList"><p class="hint">Loading…</p></div></div>
+      </div>
+    `));
+    document.getElementById("backToMenu").onclick = () => { workerScreen = "menu"; render(); };
+    return;
+  }
+
+  // workerScreen === "report"
+  app.appendChild(el(`<div><button class="btn btn-ghost" style="width:auto;margin-bottom:14px" id="backToMenu2">&larr; Back</button><div id="reportArea"></div></div>`));
+  document.getElementById("backToMenu2").onclick = () => { workerScreen = "menu"; incidentId = null; currentState = null; render(); };
+  if (!currentState) renderIntake();
+  else renderFromState();
+}
+
+async function loadMyReports(){
+  const box = document.getElementById("myReportsList");
+  try {
+    const data = await apiGet(`/incidents?reporter_employee_id=${encodeURIComponent(identity.employeeId)}&limit=20`);
+    if (!box) return; // user navigated away before this resolved
+    if (!data.incidents.length) { box.innerHTML = `<p class="empty-state">No reports filed yet.</p>`; return; }
+    box.innerHTML = "";
+    data.incidents.forEach(r => {
+      const badgeClass = r.status === "complete" ? "badge-done" : "badge-rejected";
+      const badgeText = r.status === "complete" ? "Approved" : "Rejected";
+      box.appendChild(el(`
+        <div class="list-item">
+          <div>
+            <div class="title">${esc(r.category || "—")} · ${esc(r.severity || "—")}</div>
+            <div class="meta">${esc(r.location || "")} — ${esc(r.description || "")}</div>
+            <div class="meta">${fmtDate(r.reviewed_at)}</div>
+          </div>
+          <span class="badge ${badgeClass}">${badgeText}</span>
+        </div>
+      `));
+    });
+  } catch(e) {
+    if (box) box.innerHTML = `<p class="empty-state">Couldn't load reports: ${esc(e.message)}</p>`;
+  }
+}
+
+// ---- Worker: report intake -------------------------------------------
+function renderIntake(errorMsg){
+  const box = document.getElementById("reportArea");
+  if (!box) return;
+  box.innerHTML = "";
+  box.appendChild(el(`
+    <div class="card">
+      <h1>Report an incident</h1>
+      <p class="hint">Type what happened, in English or Hinglish. The system pulls out the details it can and only asks about what's missing.</p>
+      <div class="error-box" id="errBox">${errorMsg ? esc(errorMsg) : ""}</div>
+      <div class="field">
+        <label for="transcript">Report</label>
+        <textarea id="transcript" placeholder="e.g. Block C mein worker gir gaya, hil nahi raha, kaam ruk gaya hai"></textarea>
+      </div>
+      <button class="btn btn-primary" id="submitBtn">Submit report</button>
+    </div>
+  `));
+  if (errorMsg) document.getElementById("errBox").style.display = "block";
+
+  document.getElementById("submitBtn").onclick = async () => {
+    const transcript = document.getElementById("transcript").value.trim();
+    if (!transcript) { renderIntake("Please describe what happened before submitting."); return; }
+    incidentId = newIncidentId();
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true; btn.textContent = "Submitting…";
+    try {
+      const state = await api("/process-incident", {
+        incident_id: incidentId, transcript, reporter_employee_id: identity.employeeId
+      });
+      currentState = state;
+      renderFromState();
+    } catch (e) {
+      renderIntake(e.message);
+    }
+  };
+}
+
+function renderClarification(step){
+  const box = document.getElementById("reportArea");
+  if (!box) return;
+  box.innerHTML = "";
+  const fieldNames = step.fields;
+  const isEmergency = fieldNames.includes("emergency");
+
+  const inputsHtml = fieldNames.map(fieldName => {
+    const meta = FIELD_META[fieldName] || { label: fieldName, kind: "text" };
+    let inputHtml;
+    if (meta.kind === "select") {
+      inputHtml = `<select id="answer_${fieldName}">
+        <option value="" disabled selected>Choose one</option>
+        ${meta.options.map(([v,l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("")}
+      </select>`;
+    } else {
+      inputHtml = `<input type="text" id="answer_${fieldName}" placeholder="Type your answer">`;
+    }
+    return `<div class="field"><label>${esc(meta.label)}</label>${inputHtml}</div>`;
+  }).join("");
+
+  box.appendChild(el(`
+    <div class="card">
+      <span class="badge ${isEmergency ? "badge-emergency" : "badge-progress"}">
+        ${isEmergency ? "Emergency check" : (fieldNames.length > 1 ? "A couple more details" : "One more detail")}
+      </span>
+      <h1>${esc(step.question)}</h1>
+      <div class="error-box" id="errBox"></div>
+      ${inputsHtml}
+      <button class="btn btn-primary" id="answerBtn">Continue</button>
+    </div>
+  `));
+
+  document.getElementById("answerBtn").onclick = async () => {
+    const errBox = document.getElementById("errBox");
+    const answers = {};
+    for (const fieldName of fieldNames) {
+      const val = document.getElementById("answer_" + fieldName).value.trim();
+      if (!val && !OPTIONAL_FIELDS.includes(fieldName)) {
+        errBox.textContent = "Please fill in every field before continuing.";
+        errBox.style.display = "block";
+        return;
+      }
+      answers[fieldName] = val;
+    }
+    const btn = document.getElementById("answerBtn");
+    btn.disabled = true; btn.textContent = "Saving…";
+    try {
+      const state = await api("/clarify", { incident_id: incidentId, answers });
+      currentState = state;
+      renderFromState();
+    } catch (e) {
+      errBox.textContent = e.message; errBox.style.display = "block";
+      btn.disabled = false; btn.textContent = "Continue";
+    }
+  };
+}
+
+function renderAwaitingReview(){
+  const box = document.getElementById("reportArea");
+  if (!box) return;
+  box.innerHTML = "";
+  box.appendChild(el(`
+    <div class="card">
+      <span class="badge badge-progress">Submitted</span>
+      <h1>Sent for review</h1>
+      <p class="hint">Your report has been sent to a manager for review. You'll see the outcome under "My reports" once it's been decided.</p>
+      <p class="id-tag">Incident ID: ${esc(incidentId)}</p>
+      <button class="btn btn-primary" id="doneBtn">Back to home</button>
+    </div>
+  `));
+  document.getElementById("doneBtn").onclick = () => { workerScreen = "menu"; incidentId = null; currentState = null; render(); };
+}
+
+function renderFromState(){
+  const s = currentState;
+  if (!s.is_paused || !s.pending_interrupt) {
+    // Shouldn't normally happen for a worker (they never approve/reject
+    // themselves) — treat as done, just in case.
+    renderAwaitingReview();
+    return;
+  }
+  if (s.pending_interrupt.type === "clarification") { renderClarification(s.pending_interrupt.step); return; }
+  if (s.pending_interrupt.type === "human_review") { renderAwaitingReview(); return; }
+  renderIntake("Unexpected state — please start a new report.");
+}
+
+// =========================================================================
+// MANAGER SHELL
+// =========================================================================
+function renderManagerShell(){
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+
+  if (reviewingId) {
+    app.appendChild(el(`<div><button class="btn btn-ghost" style="width:auto;margin-bottom:14px" id="backToQueue">&larr; Back to queue</button><div id="reviewArea"></div></div>`));
+    document.getElementById("backToQueue").onclick = () => { reviewingId = null; render(); };
+    loadAndRenderReview(reviewingId);
+    return;
+  }
+
+  app.appendChild(el(`
+    <div>
+      <div class="nav-tabs">
+        <div class="nav-tab ${managerTab==='pending'?'active':''}" data-tab="pending">Pending review</div>
+        <div class="nav-tab ${managerTab==='dashboard'?'active':''}" data-tab="dashboard">Dashboard</div>
+        <div class="nav-tab ${managerTab==='history'?'active':''}" data-tab="history">History</div>
+      </div>
+      <div id="managerContent"><p class="hint">Loading…</p></div>
+    </div>
+  `));
+  app.querySelectorAll(".nav-tab").forEach(tab => {
+    tab.onclick = () => { managerTab = tab.dataset.tab; render(); };
+  });
+
+  if (managerTab === "pending") loadPendingReviews();
+  else if (managerTab === "dashboard") loadDashboard();
+  else loadHistory();
+}
+
+async function loadPendingReviews(){
+  const box = document.getElementById("managerContent");
+  try {
+    const data = await apiGet("/pending-reviews");
+    if (!box) return;
+    if (!data.pending.length) { box.innerHTML = `<p class="empty-state">Nothing waiting for review right now.</p>`; return; }
+    box.innerHTML = "";
+    data.pending.forEach(p => {
+      const isEmergency = p.emergency === "yes";
+      box.appendChild(el(`
+        <div class="list-item">
+          <div>
+            <div class="title">${isEmergency ? "🚨 " : ""}${esc(p.category || "Unspecified")} · ${esc(p.severity || "—")}</div>
+            <div class="meta">${esc(p.location || "")}</div>
+            <div class="meta">Filed by employee ID: ${esc(p.reporter_employee_id || "unknown")}</div>
+          </div>
+          <div class="right">
+            <button class="mini-btn" data-id="${esc(p.incident_id)}">Review</button>
+          </div>
+        </div>
+      `));
+    });
+    box.querySelectorAll(".mini-btn").forEach(btn => {
+      btn.onclick = () => { reviewingId = btn.dataset.id; render(); };
+    });
+  } catch(e) {
+    if (box) box.innerHTML = `<p class="empty-state">Couldn't load queue: ${esc(e.message)}</p>`;
+  }
+}
+
+async function loadDashboard(){
+  const box = document.getElementById("managerContent");
+  try {
+    const d = await apiGet("/dashboard-summary");
+    if (!box) return;
+    const maxSev = Math.max(1, ...Object.values(d.by_severity || {}));
+    const maxCat = Math.max(1, ...Object.values(d.by_category || {}));
+    const bars = (obj, max) => Object.entries(obj || {}).map(([k, v]) => `
+      <div class="bar-row">
+        <div class="bar-label"><span>${esc(k)}</span><span>${v}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(v/max*100)}%"></div></div>
+      </div>`).join("") || `<p class="empty-state">No data yet.</p>`;
+
+    box.innerHTML = "";
+    box.appendChild(el(`
+      <div class="card">
+        <h2>${esc(d.month)}</h2>
+        <div class="stat-grid">
+          <div class="stat-card"><div class="num">${d.total}</div><div class="lbl">Total incidents</div></div>
+          <div class="stat-card"><div class="num">${d.approved}</div><div class="lbl">Approved</div></div>
+          <div class="stat-card"><div class="num">${d.rejected}</div><div class="lbl">Rejected</div></div>
+        </div>
+        <h2>By severity</h2>
+        ${bars(d.by_severity, maxSev)}
+        <h2 style="margin-top:18px">By category</h2>
+        ${bars(d.by_category, maxCat)}
+      </div>
+    `));
+  } catch(e) {
+    if (box) box.innerHTML = `<p class="empty-state">Couldn't load dashboard: ${esc(e.message)}</p>`;
+  }
+}
+
+async function loadHistory(){
+  const box = document.getElementById("managerContent");
+  try {
+    const data = await apiGet("/incidents?limit=20");
+    if (!box) return;
+    if (!data.incidents.length) { box.innerHTML = `<p class="empty-state">No incidents saved yet.</p>`; return; }
+    box.innerHTML = "";
+    data.incidents.forEach(r => {
+      const badgeClass = r.status === "complete" ? "badge-done" : "badge-rejected";
+      const badgeText = r.status === "complete" ? "Approved" : "Rejected";
+      box.appendChild(el(`
+        <div class="list-item">
+          <div>
+            <div class="title">${esc(r.category || "—")} · ${esc(r.severity || "—")} — ${esc(r.routing_team || "")}</div>
+            <div class="meta">${esc(r.location || "")}: ${esc(r.description || "")}</div>
+            <div class="meta">Filed by ${esc(r.reporter_employee_id || "unknown")} · Reviewed by ${esc(r.reviewed_by || "—")} · ${fmtDate(r.reviewed_at)}</div>
+          </div>
+          <span class="badge ${badgeClass}">${badgeText}</span>
+        </div>
+      `));
+    });
+  } catch(e) {
+    if (box) box.innerHTML = `<p class="empty-state">Couldn't load history: ${esc(e.message)}</p>`;
+  }
+}
+
+// ---- Manager: review a specific pending incident ------------------------
+async function loadAndRenderReview(id){
+  const box = document.getElementById("reviewArea");
+  try {
+    const state = await apiGet(`/incident/${encodeURIComponent(id)}`);
+    if (!box) return;
+    if (!state.pending_interrupt || state.pending_interrupt.type !== "human_review") {
+      box.innerHTML = `<p class="empty-state">This incident is no longer waiting for review.</p>`;
+      return;
+    }
+    renderReviewCard(id, state.pending_interrupt.fields, state.pending_interrupt.routing);
+  } catch(e) {
+    if (box) box.innerHTML = `<p class="empty-state">Couldn't load incident: ${esc(e.message)}</p>`;
+  }
+}
+
+function renderReviewCard(id, fields, routing){
+  const box = document.getElementById("reviewArea");
+  if (!box) return;
+  const rows = Object.entries(fields).map(([k, f]) => {
+    const label = (FIELD_META[k] && FIELD_META[k].label) || k;
+    const val = f.value;
+    return `<div class="field-row"><span class="k">${esc(label)}</span>
+      <span class="v ${val ? "" : "empty"}">${val ? esc(val) : "not provided"}</span></div>`;
+  }).join("");
+
+  box.innerHTML = "";
+  box.appendChild(el(`
+    <div class="card">
+      <span class="badge badge-progress">Waiting for your decision</span>
+      <h1>Review this incident</h1>
+      <div class="field-list">${rows}</div>
+      ${routing ? `
+        <div class="routing-box">
+          <b>Suggested team:</b> ${esc(routing.team)}<br>
+          <b>Action:</b> ${esc(routing.action)}
+        </div>` : ""}
+      <div id="editArea"></div>
+      <div class="btn-row" id="actionRow">
+        <button class="btn btn-approve" id="approveBtn">Approve</button>
+        <button class="btn btn-edit" id="editBtn">Edit</button>
+        <button class="btn btn-reject" id="rejectBtn">Reject</button>
+      </div>
+      <div class="error-box" id="errBox"></div>
+    </div>
+  `));
+
+  async function sendDecision(decision, edits){
+    const errBox = document.getElementById("errBox");
+    if ((decision === "approve" || decision === "reject") && !(identity.name && identity.name.trim())) {
+      errBox.textContent = "Your reviewer name is missing — please switch role and sign in again.";
+      errBox.style.display = "block";
+      return;
+    }
+    const actionRow = document.getElementById("actionRow");
+    const bannerText = decision === "approve" ? "Approving…" : decision === "reject" ? "Rejecting…" : "Saving edit…";
+    const bannerClass = decision === "approve" ? "pending-approve" : decision === "reject" ? "pending-reject" : "pending-neutral";
+    actionRow.innerHTML = `<div class="pending-banner ${bannerClass}">${bannerText}</div>`;
+
+    try {
+      const state = await api("/review", {
+        incident_id: id, decision, edits: edits || null, reviewed_by: identity.name
+      });
+      if (decision === "edit") {
+        // Loops back to human_review with updated fields/routing — redraw in place.
+        renderReviewCard(id, state.fields, state.routing);
+      } else {
+        // Approved or rejected — this item leaves the queue.
+        reviewingId = null;
+        render();
+      }
+    } catch (e) {
+      errBox.textContent = e.message; errBox.style.display = "block";
+      actionRow.innerHTML = `
+        <button class="btn btn-approve" id="approveBtn">Approve</button>
+        <button class="btn btn-edit" id="editBtn">Edit</button>
+        <button class="btn btn-reject" id="rejectBtn">Reject</button>`;
+      wireButtons();
+    }
+  }
+
+  function wireButtons(){
+    document.getElementById("approveBtn").onclick = () => sendDecision("approve");
+    document.getElementById("rejectBtn").onclick = () => sendDecision("reject");
+    document.getElementById("editBtn").onclick = onEditClick;
+  }
+  wireButtons();
+
+  function onEditClick(){
+    const editArea = document.getElementById("editArea");
+    editArea.innerHTML = Object.entries(fields).map(([k, f]) => {
+      const meta = FIELD_META[k] || { label: k, kind: "text" };
+      const label = meta.label;
+      if (meta.kind === "select") {
+        return `<div class="field"><label>${esc(label)}</label>
+          <select data-field="${esc(k)}">
+            ${meta.options.map(([v,l]) => `<option value="${esc(v)}" ${f.value===v?"selected":""}>${esc(l)}</option>`).join("")}
+          </select></div>`;
+      }
+      return `<div class="field"><label>${esc(label)}</label>
+        <input type="text" data-field="${esc(k)}" value="${esc(f.value || "")}"></div>`;
+    }).join("") + `<button class="btn btn-primary" id="saveEditBtn">Save edit and re-route</button>`;
+
+    document.getElementById("saveEditBtn").onclick = () => {
+      const edits = {};
+      editArea.querySelectorAll("[data-field]").forEach(inp => { edits[inp.dataset.field] = inp.value; });
+      sendDecision("edit", edits);
+    };
+  }
+}
+
+// =========================================================================
+// TOP-LEVEL RENDER
+// =========================================================================
+function render(){
+  updateHeader();
+  if (!role) { renderRoleGate(); return; }
+  if (role === "worker") renderWorkerShell();
+  else renderManagerShell();
+}
+
+loadSession();
+render();
+</script>
+</body>
+</html>

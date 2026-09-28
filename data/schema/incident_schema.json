@@ -33,7 +33,7 @@
     "action_needed": {
       "type": "string",
       "description": "What the speaker says should happen next, if stated",
-      "clarification_question": "What needs to happen next?",
+      "clarification_question": "Any Suggestions? (optional)",
       "input_type": "text",
       "options": null
     },

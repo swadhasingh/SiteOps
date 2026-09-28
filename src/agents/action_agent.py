@@ -14,6 +14,12 @@ sent/failed. This does NOT wait for human review — real emergencies must
 not sit in a review queue. Human review still happens afterward for the
 record itself; escalation and record-approval are deliberately decoupled.
 
+The escalation message is translated to English before sending (see
+_build_escalation_message) using the same translate_fields_to_english()
+that firestore_store.py uses when saving — so the Slack/Teams/email alert
+reads in plain English even though it fires long before the Firestore
+save step normally would.
+
 --- Microsoft Teams webhook note (current as of Aug 2026) ---
 Legacy Teams "Incoming Webhook" connectors (office.com URLs) are FULLY
 RETIRED — Microsoft completed that rollout May 18-22, 2026. Do not look
@@ -39,6 +45,8 @@ from email.mime.text import MIMEText
 
 import requests
 from dotenv import load_dotenv
+
+from src.translate import translate_fields_to_english
 
 load_dotenv()
 
@@ -185,6 +193,16 @@ def _build_escalation_message(verified_json: dict, routing: dict) -> str:
     description = verified_json.get("description", {}).get("value") or "not stated"
     reporter = verified_json.get("reporter_name", {}).get("value") or "unknown"
     team = routing.get("team", "unknown")
+
+    # Translate before building the message, so the Slack/Teams/email alert
+    # is always plain English — same rule as Firestore storage. reporter_name
+    # is a proper noun, so it's left alone on purpose.
+    translated = translate_fields_to_english({
+        "location": location,
+        "description": description,
+    })
+    location = translated.get("location", location)
+    description = translated.get("description", description)
 
     return (
         f"🚨 EMERGENCY reported on site\n"

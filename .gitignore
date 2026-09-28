@@ -20,3 +20,5 @@ data/raw/*
 .DS_Store
 .vscode/
 *.swp
+
+firestore-key.json

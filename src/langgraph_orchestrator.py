@@ -7,7 +7,7 @@ Graph shape (matches Build Plan V3, Section 3):
                               |
                        (nothing missing)
                               v
-                            route -> human_review --(edited?)--> [back to human_review]
+                            route -> human_review --(edited?)--> [back to route, then human_review]
                                             |
                                    (approved / rejected)
                                             v
@@ -54,6 +54,18 @@ through to routing/review anyway, flagging
 clarification_cycle_limit_reached=True so a human reviewer can see the
 record is incomplete rather than the graph looping forever on a broken
 LLM response or a persistently-missing field.
+
+--- Translation on the review card ---
+
+human_review_node shows the manager a TRANSLATED COPY of location/
+description/action_needed (English, even if the original report was in
+Hindi/Hinglish) so the review screen reads uniformly. This does NOT
+change what's actually stored in state["fields"] — the real record keeps
+whatever the extractor/clarification put there. If the manager approves
+without editing, Firestore still translates again at save time (see
+firestore_store.py) — that's a harmless repeat, not a conflict. If the
+manager clicks Edit, their typed value becomes the new real value,
+whatever language they typed it in.
 """
 
 from typing import Optional, TypedDict
@@ -66,6 +78,7 @@ from src.agents.extractor_agent import extract, INCIDENT_SCHEMA
 from src.agents.verifier_agent import verify
 from src.agents.clarification_agent import decide_clarifications, make_groq_llm_call
 from src.agents.action_agent import route
+from src.translate import translate_fields_to_english
 
 MAX_CLARIFICATION_CYCLES = 10
 
@@ -74,7 +87,7 @@ class IncidentState(TypedDict):
     incident_id: str
     transcript: str
     fields: dict
-    status: str  # in_progress | needs_clarification | ready_to_route | complete | rejected
+    status: str  # in_progress | needs_clarification | ready_to_route | complete | rejected | edited
     escalation: Optional[dict]
     routing: Optional[dict]
     clarification_cycles: int
@@ -159,9 +172,22 @@ def build_incident_graph(provider: str = "groq", live: bool = False,
         return updates
 
     def human_review_node(state: IncidentState) -> dict:
+        # Build a translated COPY just for what the manager sees on screen.
+        # This does NOT change the real stored data — see module docstring.
+        display_fields = dict(state["fields"])
+        to_translate = {
+            "location": display_fields.get("location", {}).get("value"),
+            "description": display_fields.get("description", {}).get("value"),
+            "action_needed": display_fields.get("action_needed", {}).get("value"),
+        }
+        translated = translate_fields_to_english(to_translate)
+        for field_name, new_value in translated.items():
+            if field_name in display_fields and display_fields[field_name].get("value"):
+                display_fields[field_name] = {**display_fields[field_name], "value": new_value}
+
         decision = interrupt({
             "type": "human_review",
-            "fields": state["fields"],
+            "fields": display_fields,
             "routing": state["routing"],
             "clarification_cycle_limit_reached": state.get("clarification_cycle_limit_reached", False),
         })
