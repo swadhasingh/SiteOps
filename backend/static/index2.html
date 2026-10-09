@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiteOps Voice Agent</title>
+<style>
+  /* ============================================================
+     Design direction: "site safety spec-sheet" — not generic dark
+     SaaS. One disciplined accent (safety amber) for action/brand;
+     green/red stay strictly semantic (verified/danger). A faint
+     blueprint grid + drafting corner-ticks on cards tie the visual
+     language to the actual subject (construction documentation),
+     and "stamped" sharp-cornered status labels echo an inspection
+     approval stamp rather than a soft SaaS pill.
+     ============================================================ */
+  :root{
+    --bg:#141A20; --surface-a:#1F262D; --surface-b:#1A2026; --surface-2:#242C34; --line:#333E48;
+    --amber:#F5A524; --amber-dim:#3D2E10;
+    --blue:#7DA6C9; --blue-dim:#1E2E3D;
+    --green:#3DD68C; --green-dim:#113826;
+    --red:#F2545B; --red-dim:#3D1E21;
+    --ink:#ECEFF2; --ink-dim:#8D98A3; --ink-faint:#5B6670;
+    --mono:"IBM Plex Mono","SF Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    display:flex;
+    background-image:
+      linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+    background-size:28px 28px;
+  }
+  a{color:inherit}
+  svg{display:block}
+  .ic svg, .ic-sm svg{width:100%; height:100%}
+
+  /* ---------- Sidebar ---------- */
+  .sidebar{
+    width:240px; flex-shrink:0; background:var(--surface-a); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; padding:22px 16px; position:sticky; top:0; height:100vh;
+    box-shadow:2px 0 14px rgba(0,0,0,.25);
+  }
+  .sb-brand{display:flex; align-items:center; gap:10px; padding:0 6px 6px; margin-bottom:4px}
+  .sb-brand .mark{
+    width:30px; height:30px; border-radius:7px; background:var(--amber-dim); color:var(--amber);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    box-shadow:0 0 0 1px rgba(245,165,36,.25), 0 0 16px rgba(245,165,36,.18);
+  }
+  .sb-brand .mark svg{width:17px; height:17px}
+  .sb-brand span{font-weight:750; font-size:17px; letter-spacing:0.3px}
+  .sb-brand span b{color:var(--amber)}
+  .sb-tagline{font-size:11.5px; color:var(--ink-faint); padding:0 6px; margin-bottom:22px}
+  .sb-nav{display:flex; flex-direction:column; gap:3px; flex:1}
+  .sb-item{
+    display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:7px;
+    font-size:14px; font-weight:600; color:var(--ink-dim); cursor:pointer; border:none; background:none;
+    width:100%; text-align:left; border-left:3px solid transparent;
+  }
+  .sb-item .ic{width:18px; height:18px; flex-shrink:0; opacity:.9}
+  .sb-item:hover{background:var(--surface-2); color:var(--ink)}
+  .sb-item.active{background:var(--amber-dim); color:var(--amber); border-left-color:var(--amber)}
+  .sb-badge{
+    margin-left:auto; background:var(--red); color:#2a0f08; font-size:10.5px; font-weight:800;
+    padding:1px 7px; border-radius:4px;
+  }
+  .sb-foot{border-top:1px solid var(--line); padding-top:14px; margin-top:10px}
+  .sb-who{display:flex; align-items:center; gap:10px; padding:4px 6px 10px}
+  .sb-avatar{
+    width:34px; height:34px; border-radius:50%; background:var(--surface-2); display:flex;
+    align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0;
+    border:1.5px solid var(--line); color:var(--amber);
+  }
+  .sb-who .name{font-size:13.5px; font-weight:700}
+  .sb-who .role{font-size:11px; color:var(--ink-faint)}
+  .sb-switch{
+    display:flex; align-items:center; justify-content:center; gap:7px;
+    background:none; border:1px solid var(--line); color:var(--ink-dim); font-size:11.5px;
+    padding:7px; border-radius:7px; width:100%; cursor:pointer; font-weight:600;
+  }
+  .sb-switch:hover{border-color:var(--amber); color:var(--amber)}
+  .sb-switch svg{width:13px; height:13px}
+  .sb-dev{font-size:10px; color:var(--ink-faint); text-align:center; margin-top:14px; letter-spacing:0.3px}
+  .sb-dev b{color:var(--amber); font-weight:800}
+
+  /* ---------- Main area ---------- */
+  .main{flex:1; min-width:0; padding:30px 36px 60px}
+  .topline{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:26px; flex-wrap:wrap; gap:14px;
+    padding-bottom:18px; border-bottom:1px solid var(--line)}
+  .topline h1{font-size:23px; margin:0 0 4px; font-weight:750; letter-spacing:-.2px}
+  .topline p{margin:0; color:var(--ink-dim); font-size:14px}
+  .status-chip{
+    display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--green); font-weight:650;
+    background:var(--green-dim); padding:6px 12px; border-radius:5px; white-space:nowrap;
+    border:1px solid rgba(61,214,140,.3);
+  }
+  .status-chip .dot{width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green)}
+
+  /* Drafting corner-ticks: a quiet nod to spec-sheet/blueprint registration marks */
+  .card{
+    position:relative; background:linear-gradient(180deg, var(--surface-a) 0%, var(--surface-b) 100%);
+    border:1px solid var(--line); border-radius:9px; padding:22px;
+    box-shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 26px rgba(0,0,0,.18);
+  }
+  .card + .card{margin-top:16px}
+  .card::before, .card::after{
+    content:""; position:absolute; width:9px; height:9px; border-color:var(--line); opacity:.8; pointer-events:none;
+  }
+  .card::before{top:-1px; left:-1px; border-top:1px solid; border-left:1px solid; border-top-left-radius:3px}
+  .card::after{bottom:-1px; right:-1px; border-bottom:1px solid; border-right:1px solid; border-bottom-right-radius:3px}
+
+  /* ---------- Buttons ---------- */
+  .btn{appearance:none; border:none; border-radius:7px; padding:12px 20px; font-size:14.5px; font-weight:700; cursor:pointer; transition:filter .12s, transform .12s}
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--amber); color:#271B04; box-shadow:0 2px 0 rgba(0,0,0,.15), 0 0 20px rgba(245,165,36,.15)}
+  .btn-primary:hover{filter:brightness(1.08)}
+  .btn-primary:disabled{background:var(--surface-2); color:var(--ink-faint); cursor:not-allowed; box-shadow:none}
+  .btn-outline{background:none; border:1.5px solid var(--line); color:var(--ink)}
+  .btn-outline:hover{border-color:var(--ink-dim)}
+  .btn-approve{background:var(--green); color:#07251A}
+  .btn-approve:hover{filter:brightness(1.08)}
+  .btn-reject{background:none; border:1.5px solid var(--red); color:var(--red)}
+  .btn-reject:hover{background:var(--red-dim)}
+  .btn-full{width:100%}
+  .btn-row{display:flex; gap:10px; flex-wrap:wrap}
+
+  /* ---------- Form fields ---------- */
+  label{display:block; font-size:12.5px; font-weight:650; color:var(--ink-dim); margin-bottom:7px; letter-spacing:0.2px}
+  textarea, input[type=text], select{
+    width:100%; font-size:15px; padding:12px 13px; border:1.5px solid var(--line);
+    border-radius:7px; font-family:inherit; background:var(--surface-2); color:var(--ink);
+  }
+  textarea{min-height:90px; resize:vertical}
+  textarea:focus, input:focus, select:focus{outline:none; border-color:var(--amber); box-shadow:0 0 0 3px rgba(245,165,36,.12)}
+  textarea::placeholder, input::placeholder{color:var(--ink-faint)}
+  .field{margin-bottom:16px}
+  select{appearance:none; background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%238D98A3" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>'); background-repeat:no-repeat; background-position:right 12px center; padding-right:34px}
+
+  .error-box{background:var(--red-dim); color:#FF9DA3; border-radius:7px; padding:12px 15px; font-size:13.5px; margin-bottom:16px; display:none; border:1px solid rgba(242,84,91,.3)}
+
+  /* ---------- Badges (stamped, not soft pills) ---------- */
+  .badge{display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:750; letter-spacing:0.3px; padding:4px 9px; border-radius:4px; border:1px solid transparent}
+  .badge-teal{background:var(--blue-dim); color:var(--blue); border-color:rgba(125,166,201,.35)}
+  .badge-amber{background:var(--amber-dim); color:var(--amber); border-color:rgba(245,165,36,.35)}
+  .badge-coral{background:var(--red-dim); color:#FF9DA3; border-color:rgba(242,84,91,.35)}
+  .badge-green{background:var(--green-dim); color:var(--green); border-color:rgba(61,214,140,.35)}
+  .badge-red{background:var(--red-dim); color:#FF9DA3; border-color:rgba(242,84,91,.35)}
+  .badge-dim{background:var(--surface-2); color:var(--ink-dim); border-color:var(--line)}
+
+  /* ---------- Role gate ---------- */
+  .gate-wrap{max-width:720px; margin:60px auto; padding:0 20px; width:100%}
+  .gate-logo{display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:30px}
+  .gate-logo .mark{
+    width:38px; height:38px; border-radius:9px; background:var(--amber-dim); color:var(--amber);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 0 1px rgba(245,165,36,.25), 0 0 20px rgba(245,165,36,.2);
+  }
+  .gate-logo .mark svg{width:21px; height:21px}
+  .gate-logo span{font-size:24px; font-weight:800}
+  .gate-logo span b{color:var(--amber)}
+  .role-options{display:flex; gap:16px; flex-wrap:wrap}
+  .role-card{
+    flex:1; min-width:240px; border:1.5px solid var(--line); border-radius:10px;
+    padding:28px 22px; cursor:pointer; background:var(--surface-a); text-align:left;
+    transition:border-color .12s, transform .12s;
+  }
+  .role-card:hover{border-color:var(--amber); transform:translateY(-2px)}
+  .role-card .emoji{font-size:28px; margin-bottom:12px}
+  .role-card h3{margin:0 0 6px; font-size:17px}
+  .role-card p{margin:0; font-size:13.5px; color:var(--ink-dim)}
+
+  /* ---------- Mic / voice ---------- */
+  .mic-wrap{text-align:center; padding:30px 10px 10px}
+  .mic-btn{
+    width:112px; height:112px; border-radius:50%; border:none; cursor:pointer;
+    background:var(--amber-dim); color:var(--amber); display:inline-flex;
+    align-items:center; justify-content:center; position:relative; transition:background .15s, transform .15s;
+    box-shadow:0 0 0 1px rgba(245,165,36,.2), 0 0 28px rgba(245,165,36,.15);
+  }
+  .mic-btn svg{width:36px; height:36px}
+  .mic-btn:hover:not(:disabled){transform:scale(1.03)}
+  .mic-btn:disabled{opacity:.4; cursor:not-allowed}
+  .mic-btn.recording{background:var(--red); color:#2a0f08; box-shadow:0 0 0 1px rgba(242,84,91,.3), 0 0 34px rgba(242,84,91,.3)}
+  .mic-btn.recording::before, .mic-btn.recording::after{
+    content:""; position:absolute; inset:-14px; border-radius:50%; border:2px solid var(--red);
+    opacity:0.6; animation:pulse 1.6s ease-out infinite;
+  }
+  .mic-btn.recording::after{animation-delay:.5s}
+  @keyframes pulse{0%{transform:scale(0.85); opacity:0.6}100%{transform:scale(1.5); opacity:0}}
+  .mic-caption{margin-top:16px; font-size:14px; color:var(--ink-dim)}
+  .mic-small{margin-top:4px; font-size:12px; color:var(--ink-faint)}
+  .divider{display:flex; align-items:center; gap:12px; margin:26px 0 18px; color:var(--ink-faint); font-size:11.5px; font-weight:700; letter-spacing:1px}
+  .divider::before, .divider::after{content:""; flex:1; height:1px; background:var(--line)}
+
+  /* ---------- Honest progress tracker (3 real states, not fake granularity) ---------- */
+  .tracker{display:flex; align-items:center; margin-bottom:22px}
+  .tracker .t-step{display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700; color:var(--ink-faint); white-space:nowrap}
+  .tracker .t-dot{width:22px; height:22px; border-radius:50%; border:1.5px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--ink-faint); flex-shrink:0}
+  .tracker .t-step.done .t-dot{background:var(--green-dim); border-color:var(--green); color:var(--green)}
+  .tracker .t-step.active .t-dot{background:var(--amber-dim); border-color:var(--amber); color:var(--amber)}
+  .tracker .t-step.active{color:var(--ink)}
+  .tracker .t-step.done{color:var(--ink-dim)}
+  .tracker .t-line{flex:1; height:1px; background:var(--line); margin:0 10px; min-width:16px}
+
+  /* ---------- Evidence review ---------- */
+  .ev-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px}
+  @media (max-width:880px){.ev-grid{grid-template-columns:1fr}}
+  .transcript-box{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:16px;
+    font-size:14.5px; line-height:1.75; color:var(--ink-dim); max-height:380px; overflow-y:auto;
+  }
+  .transcript-box mark{background:rgba(61,214,140,0.18); color:var(--green); border-radius:3px; padding:0 2px; font-weight:600; border-bottom:1.5px solid rgba(61,214,140,.5)}
+  .transcript-box mark.amber-mark{background:rgba(245,165,36,0.16); color:var(--amber); border-bottom-color:rgba(245,165,36,.5)}
+  .ev-field{border:1px solid var(--line); border-radius:8px; padding:13px 15px; margin-bottom:10px; background:var(--surface-2)}
+  .ev-field .ef-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:4px}
+  .ef-label{font-size:11px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:0.5px; font-weight:700}
+  .ef-value{font-size:15px; font-weight:650; margin-top:2px}
+  .ef-value.empty{color:var(--ink-faint); font-weight:500; font-style:italic}
+  .ef-evidence{font-size:12.5px; color:var(--green); margin-top:6px; font-style:italic}
+  .ef-reason{font-size:12.5px; color:var(--amber); margin-top:6px}
+
+  .routing-box{background:var(--blue-dim); border:1px solid rgba(125,166,201,.3); border-radius:8px; padding:14px 16px; margin:16px 0; font-size:14px}
+  .routing-box b{color:var(--blue)}
+
+  /* ---------- Queue (3 buckets) ---------- */
+  .queue-cols{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+  @media (max-width:980px){.queue-cols{grid-template-columns:1fr}}
+  .queue-col-head{display:flex; align-items:center; gap:8px; margin-bottom:12px; font-weight:750; font-size:14.5px}
+  .queue-col-head .ic-sm{width:16px; height:16px; flex-shrink:0}
+  .queue-col-head .count{margin-left:auto; font-size:12.5px; font-weight:800; color:var(--ink-faint)}
+  .q-card{background:var(--surface-a); border:1px solid var(--line); border-left:3px solid var(--line); border-radius:8px; padding:14px 15px; margin-bottom:10px; transition:transform .12s}
+  .q-card:hover{transform:translateX(2px)}
+  .q-card.emergency{border-left-color:var(--red)}
+  .q-card.attention{border-left-color:var(--amber)}
+  .q-card.ready{border-left-color:var(--green)}
+  .q-card .q-title{font-weight:700; font-size:14px; margin-bottom:3px}
+  .q-card .q-meta{font-size:12.5px; color:var(--ink-dim); margin-bottom:10px}
+  .q-card .mini-btn{width:100%; padding:9px; border-radius:6px; font-size:13px; font-weight:700; border:none; cursor:pointer; background:var(--amber); color:#271B04}
+  .q-card.emergency .mini-btn{background:var(--red); color:#2a0f08}
+
+  /* ---------- Lists (history / my reports) ---------- */
+  .list-item{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 2px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .list-item:last-child{border-bottom:none}
+  .li-title{font-weight:700; font-size:14.5px}
+  .li-meta{font-size:12.5px; color:var(--ink-dim); margin-top:3px}
+  .empty-state{color:var(--ink-faint); font-size:14px; text-align:center; padding:40px 0}
+
+  /* ---------- Dashboard ---------- */
+  .stat-grid{display:flex; gap:14px; margin-bottom:18px; flex-wrap:wrap}
+  .stat-card{flex:1; min-width:120px; background:linear-gradient(180deg, var(--surface-a), var(--surface-b)); border:1px solid var(--line); border-radius:9px; padding:18px; box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  .stat-card .num{font-size:30px; font-weight:800; color:var(--amber); letter-spacing:-.5px}
+  .stat-card .lbl{font-size:12px; color:var(--ink-dim); margin-top:3px}
+  .dash-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media (max-width:900px){.dash-grid{grid-template-columns:1fr}}
+  .bar-row{margin-bottom:11px}
+  .bar-label{display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; color:var(--ink-dim)}
+  .bar-track{background:var(--surface-2); border-radius:4px; height:8px; overflow:hidden}
+  .bar-fill{background:var(--amber); height:100%; border-radius:4px}
+  .donut-wrap{display:flex; align-items:center; gap:22px; flex-wrap:wrap}
+  .donut{width:140px; height:140px; border-radius:50%; flex-shrink:0}
+  .donut-legend{font-size:13px}
+  .donut-legend .dl-row{display:flex; align-items:center; gap:8px; margin-bottom:7px}
+  .dl-swatch{width:10px; height:10px; border-radius:3px; flex-shrink:0}
+</style>
+</head>
+<body>
+<script>
+// Guard: fail loudly in-page instead of a silent blank screen if something throws.
+// (Fixed: this previously checked for a #app element that doesn't exist on this
+// page — #root is the real mount point — so the guard never actually fired.)
+window.addEventListener('error', e => {
+  const app = document.getElementById('root');
+  if (app && !app.innerHTML.trim()) {
+    app.innerHTML = '<div class="card"><p style="color:#FF9DA3">Something went wrong loading the page: ' + (e.message||'') + '</p></div>';
+  }
+});
+</script>
+
+<div id="root"></div>
+
+<script>
+const API = "";
+
+// ---- Icon set: small inline SVGs (self-contained, no external icon font/CDN) ----
+const ICONS = {
+  mark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-1a8 8 0 0 1 16 0v1"/><path d="M2 18h20"/><path d="M12 9V5"/></svg>',
+  report: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6M9 9h1"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="m9 13 2 2 4-4"/></svg>',
+  inbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-5l-2 3h-6l-2-3H2"/><path d="M5.5 5h13l3 7v7a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1v-7Z"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16v-4M12 16V8M17 16v-7"/></svg>',
+  history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 3"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+  alertTri: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/></svg>',
+  alertCirc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>',
+  swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+};
+function icon(name, size){ return `<span class="${size==='sm'?'ic-sm':'ic'}" style="${size==='sm'?'width:16px;height:16px':''}">${ICONS[name]||''}</span>`; }
+
+// ---- Schema metadata ----
+const FIELD_META = {
+  category:  { label: "Type of incident", kind: "select", options: [
+    ["safety_hazard","Safety hazard"], ["material_damage","Material damage"],
+    ["equipment_issue","Equipment issue"], ["delay","Delay"],
+    ["quality_issue","Quality issue"], ["other","Other"] ] },
+  severity:  { label: "How severe is it", kind: "select", options: [
+    ["low","Low"], ["medium","Medium"], ["high","High"], ["critical","Critical"] ] },
+  emergency: { label: "Is this an emergency", kind: "select", options: [
+    ["yes","Yes — needs immediate attention"], ["no","No"] ] },
+  location:      { label: "Where on site did this happen", kind: "text" },
+  description:   { label: "What happened", kind: "text" },
+  action_needed: { label: "Anything you'd suggest, if you have a thought? (optional)", kind: "text" },
+  reporter_name: { label: "Your name", kind: "text" },
+};
+const OPTIONAL_FIELDS = ["action_needed"];
+
+// ---- Global session state (lightweight — NOT real auth) ----
+let role = null, identity = {};
+let incidentId = null, currentState = null;
+let workerScreen = "menu";       // menu | report | myreports
+let managerTab = "pending";      // pending | dashboard | history
+let reviewingId = null;
+let isRecording = false;
+let recognition = null;
+
+// ---- Helpers ----
+function el(html){ const d = document.createElement("div"); d.innerHTML = html.trim(); return d.firstElementChild; }
+function esc(s){ return (s ?? "").toString().replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function newIncidentId(){ return "inc-" + Date.now().toString(36); }
+function fmtDate(iso){ if(!iso) return ""; try { return new Date(iso).toLocaleString(); } catch(e){ return iso; } }
+function initials(name){ return (name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase(); }
+
+async function api(path, body){
+  const res = await fetch(API + path, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.detail || ("Request failed (" + res.status + ")"));
+  return data;
+}
+async function apiGet(path){
+  const res = await fetch(API + path);
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.detail || ("Request failed (" + res.status + ")"));
+  return data;
+}
+function saveSession(){ try{ sessionStorage.setItem("siteops_role", role||""); sessionStorage.setItem("siteops_identity", JSON.stringify(identity||{})); }catch(e){} }
+function loadSession(){ try{ const r=sessionStorage.getItem("siteops_role"); const i=sessionStorage.getItem("siteops_identity"); if(r) role=r; if(i) identity=JSON.parse(i); }catch(e){} }
+function switchRole(){
+  role=null; identity={}; incidentId=null; currentState=null; workerScreen="menu"; managerTab="pending"; reviewingId=null;
+  try{ sessionStorage.removeItem("siteops_role"); sessionStorage.removeItem("siteops_identity"); }catch(e){}
+  render();
+}
+
+// =========================================================================
+// SHELL (sidebar + main)
+// =========================================================================
+function renderShell(navItems, activeKey, bodyBuilder){
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  const nav = navItems.map(it => `
+    <button class="sb-item ${it.key===activeKey?'active':''}" data-nav="${it.key}">
+      <span class="ic">${it.icon}</span>${it.label}${it.badge ? `<span class="sb-badge">${it.badge}</span>` : ""}
+    </button>`).join("");
+
+  root.appendChild(el(`
+    <div style="display:flex;width:100%">
+      <div class="sidebar">
+        <div class="sb-brand"><span class="mark">${ICONS.mark}</span><span>SITE<b>OPS</b></span></div>
+        <div class="sb-tagline">Voice Intelligence for Safer Sites</div>
+        <div class="sb-nav">${nav}</div>
+        <div class="sb-foot">
+          <div class="sb-who">
+            <div class="sb-avatar">${esc(initials(identity.name))}</div>
+            <div><div class="name">${esc(identity.name||"")}</div>
+            <div class="role">${role==='manager'?'Site Operations Manager':'Site Worker'}</div></div>
+          </div>
+          <button class="sb-switch" id="switchRoleBtn">Switch role</button>
+          <div class="sb-dev">Developed within <b>LTM</b> — A Larsen &amp; Toubro Group Co.</div>
+        </div>
+      </div>
+      <div class="main" id="mainArea"></div>
+    </div>
+  `));
+  root.querySelectorAll("[data-nav]").forEach(b => b.onclick = () => navItems.find(n=>n.key===b.dataset.nav).onClick());
+  document.getElementById("switchRoleBtn").onclick = switchRole;
+  bodyBuilder(document.getElementById("mainArea"));
+}
+
+function topline(main, title, subtitle, chip){
+  main.appendChild(el(`
+    <div class="topline">
+      <div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>
+      ${chip ? `<div class="status-chip"><span class="dot"></span>${esc(chip)}</div>` : ""}
+    </div>
+  `));
+}
+
+// =========================================================================
+// ROLE GATE
+// =========================================================================
+function renderRoleGate(){
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  root.appendChild(el(`
+    <div class="gate-wrap">
+      <div class="gate-logo"><span class="mark">${ICONS.mark}</span><span>SITE<b>OPS</b></span></div>
+      <div class="card">
+        <h1 style="margin-top:0">Who's using this?</h1>
+        <p style="color:var(--ink-dim);font-size:14px;margin-top:-6px">A lightweight session check for this demo — not a secure login.</p>
+        <div class="role-options">
+          <div class="role-card" id="pickWorker">
+            <div class="emoji">🧑‍🔧</div>
+            <h3>I'm reporting an incident</h3>
+            <p>File a report by voice or text, and see your own past reports.</p>
+          </div>
+          <div class="role-card" id="pickManager">
+            <div class="emoji">🗂️</div>
+            <h3>I'm reviewing incidents</h3>
+            <p>See what's waiting, a live dashboard, and history.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `));
+  document.getElementById("pickWorker").onclick = () => renderIdentityForm("worker");
+  document.getElementById("pickManager").onclick = () => renderIdentityForm("manager");
+}
+
+function renderIdentityForm(pickedRole){
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  const isWorker = pickedRole === "worker";
+  root.appendChild(el(`
+    <div class="gate-wrap">
+      <div class="gate-logo"><span class="mark">${ICONS.mark}</span><span>SITE<b>OPS</b></span></div>
+      <div class="card">
+        <h1 style="margin-top:0">${isWorker ? "Reporter details" : "Reviewer details"}</h1>
+        <p style="color:var(--ink-dim);font-size:14px;margin-top:-6px">${isWorker
+          ? "Your employee ID is only shown to managers, for accountability."
+          : "Your name is recorded against every decision you make."}</p>
+        <div class="error-box" id="errBox"></div>
+        <div class="field"><label>Your name</label><input type="text" id="idName" placeholder="e.g. Ravi Kumar"></div>
+        ${isWorker ? `<div class="field"><label>Employee ID</label><input type="text" id="idEmpId" placeholder="e.g. EMP1042"></div>` : ""}
+        <button class="btn btn-primary btn-full" id="idContinue">Continue</button>
+      </div>
+    </div>
+  `));
+  document.getElementById("idContinue").onclick = () => {
+    const name = document.getElementById("idName").value.trim();
+    const empId = isWorker ? document.getElementById("idEmpId").value.trim() : null;
+    const errBox = document.getElementById("errBox");
+    if (!name || (isWorker && !empId)) { errBox.textContent = "Please fill in every field."; errBox.style.display="block"; return; }
+    role = pickedRole; identity = isWorker ? {name, employeeId: empId} : {name};
+    workerScreen = "menu"; managerTab = "pending";
+    saveSession(); render();
+  };
+}
+
+// =========================================================================
+// WORKER
+// =========================================================================
+function workerNav(){
+  return [
+    { key:"report", icon:ICONS.report, label:"Report Incident", onClick:()=>{ workerScreen="report"; incidentId=null; currentState=null; render(); } },
+    { key:"myreports", icon:ICONS.list, label:"My Reports", onClick:()=>{ workerScreen="myreports"; render(); } },
+  ];
+}
+
+function renderWorkerShell(){
+  renderShell(workerNav(), workerScreen === "menu" ? "report" : workerScreen, (main) => {
+    if (workerScreen === "myreports") return renderMyReports(main);
+    return renderReportFlow(main);
+  });
+}
+
+function renderReportFlow(main){
+  if (!currentState) return renderIntake(main);
+  const s = currentState;
+  if (!s.is_paused || !s.pending_interrupt) return renderAwaitingReview(main);
+  if (s.pending_interrupt.type === "clarification") return renderClarification(main, s.pending_interrupt.step);
+  if (s.pending_interrupt.type === "human_review") return renderAwaitingReview(main);
+  return renderIntake(main, "Unexpected state — please start a new report.");
+}
+
+function setupSpeechRecognition(onResult, onEnd){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r = new SR();
+  r.lang = "en-IN"; r.interimResults = true; r.continuous = true;
+  let finalText = "";
+  r.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const txt = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += txt + " "; else interim += txt;
+    }
+    onResult(finalText + interim);
+  };
+  r.onend = () => onEnd();
+  r.onerror = () => onEnd();
+  return r;
+}
+
+function renderIntake(main, errorMsg){
+  topline(main, "Report an Incident", "Tell us what happened — SiteOps will structure and verify your report.", "All systems operational");
+  const SR_SUPPORTED = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  main.appendChild(el(`
+    <div class="card">
+      <div class="error-box" id="errBox">${errorMsg ? esc(errorMsg) : ""}</div>
+      <div class="mic-wrap">
+        <button class="mic-btn" id="micBtn" ${SR_SUPPORTED ? "" : "disabled"}>🎙️</button>
+        <div class="mic-caption" id="micCaption">${SR_SUPPORTED ? "Tap the microphone and describe the incident." : "Voice input isn't supported in this browser — please use text below."}</div>
+        <div class="mic-small">${SR_SUPPORTED ? "Works best in Chrome. English or Hinglish." : ""}</div>
+      </div>
+      <div class="divider">OR ENTER TEXT</div>
+      <div class="field">
+        <textarea id="transcript" placeholder="e.g. Block C mein worker gir gaya, hil nahi raha, kaam ruk gaya hai"></textarea>
+      </div>
+      <button class="btn btn-primary btn-full" id="submitBtn">Submit Report</button>
+    </div>
+  `));
+  if (errorMsg) document.getElementById("errBox").style.display = "block";
+
+  const micBtn = document.getElementById("micBtn");
+  const micCaption = document.getElementById("micCaption");
+  const ta = document.getElementById("transcript");
+
+  if (SR_SUPPORTED) {
+    micBtn.onclick = () => {
+      if (isRecording) {
+        recognition && recognition.stop();
+        return;
+      }
+      recognition = setupSpeechRecognition(
+        (text) => { ta.value = text; },
+        () => { isRecording = false; micBtn.classList.remove("recording"); micCaption.textContent = "Tap the microphone and describe the incident."; }
+      );
+      if (!recognition) return;
+      isRecording = true;
+      micBtn.classList.add("recording");
+      micCaption.textContent = "Listening… tap again to stop.";
+      try { recognition.start(); } catch(e) {}
+    };
+  }
+
+  document.getElementById("submitBtn").onclick = async () => {
+    const transcript = ta.value.trim();
+    if (!transcript) { renderReportFlow(main.parentElement ? main : main); renderIntake(main, "Please describe what happened before submitting."); return; }
+    incidentId = newIncidentId();
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true; btn.textContent = "Submitting…";
+    try {
+      const state = await api("/process-incident", { incident_id: incidentId, transcript, reporter_employee_id: identity.employeeId });
+      currentState = state;
+      renderWorkerShell();
+    } catch(e) {
+      renderWorkerShell();
+      renderIntake(document.getElementById("mainArea"), e.message);
+    }
+  };
+}
+
+function renderClarification(main, step){
+  const isEmergency = step.fields.includes("emergency");
+  topline(main, isEmergency ? "Emergency Check" : "One More Detail", "We need a little more information before this report can be completed.", null);
+  const inputsHtml = step.fields.map(fieldName => {
+    const meta = FIELD_META[fieldName] || { label: fieldName, kind: "text" };
+    let input;
+    if (meta.kind === "select") {
+      input = `<select id="answer_${fieldName}"><option value="" disabled selected>Choose one</option>
+        ${meta.options.map(([v,l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("")}</select>`;
+    } else {
+      input = `<input type="text" id="answer_${fieldName}" placeholder="Type your answer">`;
+    }
+    return `<div class="field"><label>${esc(meta.label)}</label>${input}</div>`;
+  }).join("");
+
+  main.appendChild(el(`
+    <div class="card">
+      <span class="badge ${isEmergency ? "badge-coral" : "badge-teal"}" style="margin-bottom:16px">${isEmergency ? "Emergency check" : "Required detail"}</span>
+      <h2 style="margin:0 0 18px">${esc(step.question)}</h2>
+      <div class="error-box" id="errBox"></div>
+      ${inputsHtml}
+      <button class="btn btn-primary btn-full" id="answerBtn">Continue</button>
+    </div>
+  `));
+
+  document.getElementById("answerBtn").onclick = async () => {
+    const errBox = document.getElementById("errBox");
+    const answers = {};
+    for (const f of step.fields) {
+      const val = document.getElementById("answer_"+f).value.trim();
+      if (!val && !OPTIONAL_FIELDS.includes(f)) { errBox.textContent = "Please fill in every field before continuing."; errBox.style.display="block"; return; }
+      answers[f] = val;
+    }
+    const btn = document.getElementById("answerBtn");
+    btn.disabled = true; btn.textContent = "Saving…";
+    try {
+      currentState = await api("/clarify", { incident_id: incidentId, answers });
+      renderWorkerShell();
+    } catch(e) {
+      errBox.textContent = e.message; errBox.style.display = "block";
+      btn.disabled = false; btn.textContent = "Continue";
+    }
+  };
+}
+
+function renderAwaitingReview(main){
+  topline(main, "Sent for Review", "", null);
+  main.appendChild(el(`
+    <div class="card" style="text-align:center">
+      <div style="font-size:40px;margin-bottom:10px">✅</div>
+      <h2 style="margin:0 0 8px">Your report has been submitted</h2>
+      <p style="color:var(--ink-dim);font-size:14px">A manager will review it shortly. Check <b style="color:var(--ink)">My Reports</b> to see the outcome.</p>
+      <p style="font-family:var(--mono);font-size:12px;color:var(--ink-faint);margin-top:14px">Incident ID: ${esc(incidentId)}</p>
+      <button class="btn btn-primary" id="doneBtn" style="margin-top:10px">Back to Report Incident</button>
+    </div>
+  `));
+  document.getElementById("doneBtn").onclick = () => { workerScreen="report"; incidentId=null; currentState=null; render(); };
+}
+
+function renderMyReports(main){
+  topline(main, "My Reports", "Status of incidents you've filed.", null);
+  main.appendChild(el(`<div class="card" id="myReportsCard"><p style="color:var(--ink-dim)">Loading…</p></div>`));
+  (async () => {
+    const box = document.getElementById("myReportsCard");
+    try {
+      const data = await apiGet(`/incidents?reporter_employee_id=${encodeURIComponent(identity.employeeId)}&limit=20`);
+      if (!box) return;
+      if (!data.incidents.length) { box.innerHTML = `<p class="empty-state">No reports filed yet.</p>`; return; }
+      box.innerHTML = data.incidents.map(r => {
+        const approved = r.status === "complete";
+        return `<div class="list-item">
+          <div><div class="li-title">${esc(r.category||"—")} · ${esc(r.severity||"—")}</div>
+          <div class="li-meta">${esc(r.location||"")} — ${esc(r.description||"")}</div>
+          <div class="li-meta">${fmtDate(r.reviewed_at)}</div></div>
+          <span class="badge ${approved?'badge-green':'badge-red'}">${approved?'Approved':'Rejected'}</span>
+        </div>`;
+      }).join("");
+    } catch(e) { if (box) box.innerHTML = `<p class="empty-state">Couldn't load reports: ${esc(e.message)}</p>`; }
+  })();
+}
+
+// =========================================================================
+// MANAGER
+// =========================================================================
+function managerNav(){
+  return [
+    { key:"pending", icon:ICONS.inbox, label:"Review Queue", onClick:()=>{ managerTab="pending"; reviewingId=null; render(); } },
+    { key:"dashboard", icon:ICONS.chart, label:"Analytics", onClick:()=>{ managerTab="dashboard"; reviewingId=null; render(); } },
+    { key:"history", icon:ICONS.history, label:"History", onClick:()=>{ managerTab="history"; reviewingId=null; render(); } },
+  ];
+}
+
+function renderManagerShell(){
+  renderShell(managerNav(), reviewingId ? "pending" : managerTab, (main) => {
+    if (reviewingId) return renderReviewLoader(main, reviewingId);
+    if (managerTab === "dashboard") return renderDashboard(main);
+    if (managerTab === "history") return renderHistory(main);
+    return renderPendingQueue(main);
+  });
+}
+
+function bucketOf(p){
+  if (p.emergency === "yes") return "emergency";
+  if (p.has_flagged) return "attention";
+  return "ready";
+}
+
+function renderPendingQueue(main){
+  topline(main, "Review Queue", "AI-processed incidents waiting for human verification.", "All systems operational");
+  main.appendChild(el(`<div class="queue-cols" id="queueCols">
+    <div><div class="queue-col-head">🚨 Emergency <span class="count" id="cnt-emergency">0</span></div><div id="col-emergency"></div></div>
+    <div><div class="queue-col-head">⚠️ Needs Attention <span class="count" id="cnt-attention">0</span></div><div id="col-attention"></div></div>
+    <div><div class="queue-col-head">✅ Ready for Review <span class="count" id="cnt-ready">0</span></div><div id="col-ready"></div></div>
+  </div>`));
+  (async () => {
+    try {
+      const data = await apiGet("/pending-reviews");
+      const cols = { emergency: [], attention: [], ready: [] };
+      data.pending.forEach(p => cols[bucketOf(p)].push(p));
+      ["emergency","attention","ready"].forEach(key => {
+        document.getElementById("cnt-"+key).textContent = cols[key].length;
+        const colEl = document.getElementById("col-"+key);
+        if (!cols[key].length) { colEl.innerHTML = `<p class="empty-state" style="padding:20px 0">Nothing here.</p>`; return; }
+        colEl.innerHTML = cols[key].map(p => `
+          <div class="q-card ${key==='emergency'?'emergency':''}">
+            <div class="q-title">${esc(p.category || "Unspecified")}</div>
+            <div class="q-meta">${esc(p.location||"—")} · Severity: ${esc(p.severity||"—")}</div>
+            <div class="q-meta">Filed by: ${esc(p.reporter_employee_id || "unknown")}</div>
+            <button class="mini-btn" data-id="${esc(p.incident_id)}">${key==='emergency'?'Immediate Review →':'Review Incident →'}</button>
+          </div>`).join("");
+        colEl.querySelectorAll("[data-id]").forEach(b => b.onclick = () => { reviewingId = b.dataset.id; render(); });
+      });
+    } catch(e) {
+      document.getElementById("queueCols").innerHTML = `<p class="empty-state">Couldn't load queue: ${esc(e.message)}</p>`;
+    }
+  })();
+}
+
+function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function buildHighlightedTranscript(transcript, fields){
+  if (!transcript) return "";
+  let html = esc(transcript);
+  const spans = [];
+  Object.values(fields).forEach(f => {
+    if (f.source_span && typeof f.source_span === "string" && f.source_span.trim()) {
+      const supported = f.semantic ? f.semantic.supported !== false : true;
+      spans.push({ text: f.source_span, cls: supported ? "" : "amber-mark" });
+    }
+  });
+  // Replace longest spans first so overlapping matches don't fragment badly.
+  spans.sort((a,b) => b.text.length - a.text.length);
+  spans.forEach(({text, cls}) => {
+    const escText = esc(text);
+    const re = new RegExp(escapeRegExp(escText), "i");
+    if (re.test(html)) html = html.replace(re, `<mark class="${cls}">${escText}</mark>`);
+  });
+  return html;
+}
+
+function fieldStatusBadge(f){
+  if (f.value == null || f.value === "") return { label: "Not provided", cls: "badge-dim" };
+  if (f.source === "clarification") return { label: "From interview", cls: "badge-teal" };
+  if (f.semantic) {
+    if (f.semantic.status === "checked" && f.semantic.supported === true) return { label: "Verified", cls: "badge-green" };
+    return { label: "Needs attention", cls: "badge-amber" };
+  }
+  return { label: "Verified", cls: "badge-green" };
+}
+
+function renderReviewLoader(main, id){
+  topline(main, "Incident Review", `#${id}`, null);
+  main.appendChild(el(`<div class="card" id="reviewCard"><p style="color:var(--ink-dim)">Loading…</p></div>`));
+  (async () => {
+    try {
+      const state = await apiGet(`/incident/${encodeURIComponent(id)}`);
+      if (!state.pending_interrupt || state.pending_interrupt.type !== "human_review") {
+        document.getElementById("reviewCard").innerHTML = `<p class="empty-state">This incident is no longer waiting for review.</p>`;
+        return;
+      }
+      renderReviewCard(id, state.transcript, state.pending_interrupt.fields, state.pending_interrupt.routing);
+    } catch(e) {
+      const c = document.getElementById("reviewCard");
+      if (c) c.innerHTML = `<p class="empty-state">Couldn't load incident: ${esc(e.message)}</p>`;
+    }
+  })();
+}
+
+function renderReviewCard(id, transcript, fields, routing){
+  const card = document.getElementById("reviewCard");
+  if (!card) return;
+
+  const fieldsHtml = Object.entries(fields).map(([k, f]) => {
+    const meta = FIELD_META[k] || { label: k };
+    const badge = fieldStatusBadge(f);
+    const hasValue = f.value != null && f.value !== "";
+    let extra = "";
+    if (hasValue && badge.label === "Verified" && f.source_span) {
+      extra = `<div class="ef-evidence">Evidence: "${esc(f.source_span)}"</div>`;
+    } else if (hasValue && badge.label === "Needs attention" && f.semantic && f.semantic.reason) {
+      extra = `<div class="ef-reason">⚠ ${esc(f.semantic.reason)}</div>`;
+    }
+    return `<div class="ev-field">
+      <div class="ef-top"><span class="ef-label">${esc(meta.label)}</span><span class="badge ${badge.cls}">${badge.label}</span></div>
+      <div class="ef-value ${hasValue?'':'empty'}">${hasValue ? esc(f.value) : 'not provided'}</div>
+      ${extra}
+    </div>`;
+  }).join("");
+
+  card.innerHTML = "";
+  card.appendChild(el(`
+    <div>
+      <span class="badge badge-dim" style="margin-bottom:14px">Waiting for your decision</span>
+      <div class="ev-grid">
+        <div>
+          <label>Original Report</label>
+          <div class="transcript-box">${buildHighlightedTranscript(transcript, fields) || '<span style="color:var(--ink-faint)">No transcript available</span>'}</div>
+        </div>
+        <div>
+          <label>Extracted Incident Fields</label>
+          ${fieldsHtml}
+        </div>
+      </div>
+      ${routing ? `<div class="routing-box"><b>Suggested team:</b> ${esc(routing.team)}<br><b>Action:</b> ${esc(routing.action)}</div>` : ""}
+      <div id="editArea"></div>
+      <div class="field"><label>Your name (reviewer)</label><input type="text" id="reviewerName" placeholder="Needed to approve or reject" value="${esc(identity.name||'')}"></div>
+      <div class="btn-row" id="actionRow">
+        <button class="btn btn-approve" id="approveBtn">Approve Incident</button>
+        <button class="btn btn-outline" id="editBtn">Edit</button>
+        <button class="btn btn-reject" id="rejectBtn">Reject</button>
+      </div>
+      <div class="error-box" id="errBox"></div>
+      <p style="text-align:center;color:var(--ink-faint);font-size:12px;margin-top:14px">AI assists. Human decides.</p>
+    </div>
+  `));
+
+  async function sendDecision(decision, edits){
+    const errBox = document.getElementById("errBox");
+    const reviewedBy = document.getElementById("reviewerName").value.trim();
+    if ((decision==="approve"||decision==="reject") && !reviewedBy) {
+      errBox.textContent = "Please enter your name before approving or rejecting."; errBox.style.display="block"; return;
+    }
+    const actionRow = document.getElementById("actionRow");
+    const bannerCls = decision==="approve" ? "badge-green" : decision==="reject" ? "badge-red" : "badge-teal";
+    const bannerText = decision==="approve" ? "Approving…" : decision==="reject" ? "Rejecting…" : "Saving edit…";
+    actionRow.innerHTML = `<span class="badge ${bannerCls}" style="font-size:14px;padding:10px 18px">${bannerText}</span>`;
+    try {
+      const state = await api("/review", { incident_id:id, decision, edits: edits||null, reviewed_by: reviewedBy||null });
+      if (decision === "edit") { renderReviewCard(id, state.transcript, state.fields, state.routing); }
+      else { reviewingId = null; render(); }
+    } catch(e) {
+      errBox.textContent = e.message; errBox.style.display = "block";
+      actionRow.innerHTML = `
+        <button class="btn btn-approve" id="approveBtn">Approve Incident</button>
+        <button class="btn btn-outline" id="editBtn">Edit</button>
+        <button class="btn btn-reject" id="rejectBtn">Reject</button>`;
+      wireButtons();
+    }
+  }
+  function wireButtons(){
+    document.getElementById("approveBtn").onclick = () => sendDecision("approve");
+    document.getElementById("rejectBtn").onclick = () => sendDecision("reject");
+    document.getElementById("editBtn").onclick = onEditClick;
+  }
+  wireButtons();
+
+  function onEditClick(){
+    const editArea = document.getElementById("editArea");
+    editArea.innerHTML = Object.entries(fields).map(([k,f]) => {
+      const meta = FIELD_META[k] || { label:k, kind:"text" };
+      if (meta.kind === "select") {
+        return `<div class="field"><label>${esc(meta.label)}</label><select data-field="${esc(k)}">
+          ${meta.options.map(([v,l]) => `<option value="${esc(v)}" ${f.value===v?"selected":""}>${esc(l)}</option>`).join("")}
+        </select></div>`;
+      }
+      return `<div class="field"><label>${esc(meta.label)}</label><input type="text" data-field="${esc(k)}" value="${esc(f.value||"")}"></div>`;
+    }).join("") + `<button class="btn btn-primary" id="saveEditBtn">Save Edit &amp; Re-route</button>`;
+    document.getElementById("saveEditBtn").onclick = () => {
+      const edits = {};
+      editArea.querySelectorAll("[data-field]").forEach(inp => { edits[inp.dataset.field] = inp.value; });
+      sendDecision("edit", edits);
+    };
+  }
+}
+
+function renderHistory(main){
+  topline(main, "Incident History", "All reviewed incidents, approved and rejected.", null);
+  main.appendChild(el(`<div class="card" id="historyCard"><p style="color:var(--ink-dim)">Loading…</p></div>`));
+  (async () => {
+    const box = document.getElementById("historyCard");
+    try {
+      const data = await apiGet("/incidents?limit=20");
+      if (!box) return;
+      if (!data.incidents.length) { box.innerHTML = `<p class="empty-state">No incidents saved yet.</p>`; return; }
+      box.innerHTML = data.incidents.map(r => {
+        const approved = r.status === "complete";
+        return `<div class="list-item">
+          <div><div class="li-title">${esc(r.category||"—")} · ${esc(r.severity||"—")} — ${esc(r.routing_team||"")}</div>
+          <div class="li-meta">${esc(r.location||"")}: ${esc(r.description||"")}</div>
+          <div class="li-meta">Filed by ${esc(r.reporter_employee_id||"unknown")} · Reviewed by ${esc(r.reviewed_by||"—")} · ${fmtDate(r.reviewed_at)}</div></div>
+          <span class="badge ${approved?'badge-green':'badge-red'}">${approved?'Approved':'Rejected'}</span>
+        </div>`;
+      }).join("");
+    } catch(e) { if (box) box.innerHTML = `<p class="empty-state">Couldn't load history: ${esc(e.message)}</p>`; }
+  })();
+}
+
+function donutSvg(data, colors){
+  const total = Object.values(data).reduce((a,b)=>a+b,0);
+  if (!total) return null;
+  let acc = 0;
+  const r = 60, cx = 70, cy = 70, stroke = 22;
+  const circumference = 2 * Math.PI * r;
+  const segs = Object.entries(data).map(([k,v], i) => {
+    const frac = v/total;
+    const dash = frac * circumference;
+    const el = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${colors[i%colors.length]}" stroke-width="${stroke}"
+      stroke-dasharray="${dash} ${circumference-dash}" stroke-dashoffset="${-acc}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    acc += dash;
+    return el;
+  }).join("");
+  return `<svg viewBox="0 0 140 140" class="donut">${segs}</svg>`;
+}
+
+function renderDashboard(main){
+  topline(main, "Site Analytics", "Real counts from reviewed incidents — no placeholder data.", "All systems operational");
+  main.appendChild(el(`<div id="dashBody"><p style="color:var(--ink-dim)">Loading…</p></div>`));
+  (async () => {
+    const box = document.getElementById("dashBody");
+    try {
+      const d = await apiGet("/dashboard-summary");
+      if (!box) return;
+      const colors = ["#2DD4BF","#FF6B4A","#FBBF24","#60A5FA","#A78BFA","#F2545B"];
+      const maxCat = Math.max(1, ...Object.values(d.by_category||{}));
+      const maxTeam = Math.max(1, ...Object.values(d.by_team||{}));
+      const bars = (obj, max) => Object.entries(obj||{}).map(([k,v]) => `
+        <div class="bar-row"><div class="bar-label"><span>${esc(k)}</span><span>${v}</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.round(v/max*100)}%"></div></div></div>`).join("")
+        || `<p class="empty-state" style="padding:10px 0">No data yet.</p>`;
+
+      const severityEntries = Object.entries(d.by_severity||{});
+      const donut = donutSvg(d.by_severity||{}, colors);
+      const legend = severityEntries.map(([k,v],i) => `
+        <div class="dl-row"><span class="dl-swatch" style="background:${colors[i%colors.length]}"></span>${esc(k)} — ${v}</div>`).join("")
+        || `<p class="empty-state">No data yet.</p>`;
+
+      box.innerHTML = "";
+      box.appendChild(el(`
+        <div>
+          <div class="stat-grid">
+            <div class="stat-card"><div class="num">${d.total}</div><div class="lbl">Total incidents (${esc(d.month)})</div></div>
+            <div class="stat-card"><div class="num">${d.approved}</div><div class="lbl">Approved</div></div>
+            <div class="stat-card"><div class="num">${d.rejected}</div><div class="lbl">Rejected</div></div>
+          </div>
+          <div class="dash-grid">
+            <div class="card">
+              <h2 style="margin-top:0">Severity Distribution</h2>
+              <div class="donut-wrap">${donut || '<p class="empty-state">No data yet.</p>'}<div class="donut-legend">${legend}</div></div>
+            </div>
+            <div class="card">
+              <h2 style="margin-top:0">Incident Categories</h2>
+              ${bars(d.by_category, maxCat)}
+            </div>
+            <div class="card">
+              <h2 style="margin-top:0">Team Routing (approved)</h2>
+              ${bars(d.by_team, maxTeam)}
+            </div>
+            <div class="card">
+              <h2 style="margin-top:0">Outcomes</h2>
+              ${bars({Approved:d.approved, Rejected:d.rejected}, Math.max(1,d.approved,d.rejected))}
+            </div>
+          </div>
+        </div>
+      `));
+    } catch(e) {
+      if (box) box.innerHTML = `<p class="empty-state">Couldn't load dashboard: ${esc(e.message)}</p>`;
+    }
+  })();
+}
+
+// =========================================================================
+// TOP-LEVEL RENDER
+// =========================================================================
+function render(){
+  if (!role) { renderRoleGate(); return; }
+  if (role === "worker") renderWorkerShell();
+  else renderManagerShell();
+}
+
+loadSession();
+render();
+</script>
+</body>
+</html>

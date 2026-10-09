@@ -1,0 +1,10 @@
+{
+  "description": "A premium AI-powered operations platform for construction safety that enhances incident reporting, evidence verification, and human oversight with a clear, trustworthy interface.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
