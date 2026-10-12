@@ -78,14 +78,19 @@ from src.agents.extractor_agent import extract, INCIDENT_SCHEMA
 from src.agents.verifier_agent import verify
 from src.agents.clarification_agent import decide_clarifications, make_groq_llm_call
 from src.agents.action_agent import route
-from src.translate import translate_fields_to_english
+from src.translate import translate_fields_to_english, translate_text_to_english
 
 MAX_CLARIFICATION_CYCLES = 10
 
 
 class IncidentState(TypedDict):
     incident_id: str
+    # transcript is always the English processing transcript.
     transcript: str
+    # original_transcript is preserved verbatim for audit/reference.
+    original_transcript: str
+    reporter_employee_id: str
+    site_id: str
     fields: dict
     status: str  # in_progress | needs_clarification | ready_to_route | complete | rejected | edited
     escalation: Optional[dict]
@@ -157,8 +162,11 @@ def build_incident_graph(provider: str = "groq", live: bool = False,
         # answer: {field_name: value, ...} -- one entry, or two for a merged step
         updated_fields = dict(state["fields"])
         for field_name, value in answer.items():
+            normalized_value = value
+            if field_name != "reporter_name" and isinstance(value, str) and value.strip():
+                normalized_value = translate_text_to_english(value)
             updated_fields[field_name] = {
-                "value": value, "source_span": None,
+                "value": normalized_value, "source_span": None,
                 "source": "clarification", "verified": True,
             }
         return {"fields": updated_fields, "clarification_cycles": state["clarification_cycles"] + 1}
@@ -229,13 +237,17 @@ def build_incident_graph(provider: str = "groq", live: bool = False,
     return graph.compile(checkpointer=checkpointer or MemorySaver())
 
 
-def start_incident(graph, incident_id: str, transcript: str) -> dict:
-    """Starts a new incident. Returns the paused (or, rarely, immediately
-    complete) state. Always pass the SAME incident_id to resume it later."""
+def start_incident(graph, incident_id: str, transcript: str, reporter_employee_id: str, site_id: str) -> dict:
+    """Translate the worker's original speech first, then run the entire AI
+    workflow on the English transcript. The original is preserved separately."""
     config = {"configurable": {"thread_id": incident_id}}
+    english_transcript = translate_text_to_english(transcript)
     initial_state = {
         "incident_id": incident_id,
-        "transcript": transcript,
+        "transcript": english_transcript,
+        "original_transcript": transcript,
+        "reporter_employee_id": reporter_employee_id,
+        "site_id": site_id,
         "fields": {},
         "status": "in_progress",
         "escalation": None,

@@ -1,151 +1,95 @@
-"""
-Firestore persistence for SiteOps Voice Agent.
+"""Firestore persistence for SiteOps.
 
-This is the ONLY file that talks to Firestore. Everything else (main.py,
-the orchestrator) stays unaware of the database — they just call
-save_incident() with a finished incident and get back a record.
-
-Collection layout (Native mode, project set by FIRESTORE_PROJECT_ID):
-
-  incidents/{incident_id}
-      category, severity, location, description, action_needed,
-      emergency, reporter_name        <- plain values, not the nested
-                                          {"value": ..., "source_span": ...}
-                                          shape the graph uses internally.
-                                          Flattened here so Firestore's
-                                          console and simple dashboard
-                                          queries don't need to unwrap it.
-      status            "complete" | "rejected"
-      routing_team, routing_action, routing_source
-      escalation        dict, as returned by the Router (email/slack/teams)
-      reviewed_by       string the reviewer typed in (no auth yet — see
-                         Build Plan Section 9, "known limits")
-      reviewed_at       Firestore server timestamp (set by the server,
-                         not the laptop's clock, so it's trustworthy even
-                         if a laptop's clock is wrong)
-
-This flattening is a deliberate, one-way copy for storage and the
-dashboard. The graph's own in-memory state (with source_span, verified,
-etc.) is untouched and still what /clarify and /review operate on while
-an incident is in progress.
+Firestore stores final incident records plus SiteOps user profiles.
+Worker identity is always the employee_id; worker names are never persisted
+in incident documents. The emergency-only reporter_name remains in the
+in-memory workflow long enough to send Slack/email alerts, but is removed
+before persistence.
 """
 
-import json
+import datetime
 import os
 from typing import Optional
 
-import requests
 from google.cloud import firestore
+
 from src.translate import translate_fields_to_english
 
 _client: Optional[firestore.Client] = None
 
 INCIDENTS_COLLECTION = "incidents"
-
-# Free-text fields that may contain Hinglish and need translating before
-# storage. category/severity/emergency are already fixed English enum
-# values from the schema, so they're left untouched. reporter_name is a
-# proper noun and is also left untouched.
+USERS_COLLECTION = "users"
 TRANSLATABLE_FIELDS = ["location", "description", "action_needed"]
-
-# Same model your other agents already use (extractor_agent.py,
-# verifier_agent.py, action_agent.py, clarification_agent.py) — kept
-# consistent rather than introducing a second model/library for one
-# feature. Same endpoint style too: plain requests.post, no groq package.
-GROQ_MODEL = "openai/gpt-oss-120b"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 def get_client() -> firestore.Client:
-    """Lazy singleton — created on first use, not at import time. This
-    means importing this module never fails just because GCP isn't
-    configured yet; it only fails when you actually try to save."""
     global _client
     if _client is None:
-        project_id = os.environ.get("FIRESTORE_PROJECT_ID")
+        project_id = os.environ.get("FIRESTORE_PROJECT_ID") or os.environ.get("FIREBASE_PROJECT_ID")
         if not project_id:
-            raise RuntimeError(
-                "FIRESTORE_PROJECT_ID is not set in .env — cannot connect to Firestore."
-            )
+            raise RuntimeError("FIRESTORE_PROJECT_ID/FIREBASE_PROJECT_ID is not set")
         _client = firestore.Client(project=project_id)
     return _client
 
 
+def get_user_profile(uid: str) -> Optional[dict]:
+    """Return the authorization profile for a verified Firebase UID."""
+    snap = get_client().collection(USERS_COLLECTION).document(uid).get()
+    return snap.to_dict() if snap.exists else None
 
 
 def _flatten_fields(fields: dict) -> dict:
-    """Converts {"category": {"value": "safety_hazard", ...}, ...} into
-    {"category": "safety_hazard", ...} for storage. Firestore CAN store
-    nested dicts fine — this is a readability choice, not a technical
-    requirement, so simple dashboard queries don't need to reach into
-    nested maps."""
     return {k: v.get("value") for k, v in fields.items()}
 
 
-def save_incident(incident_id: str, state: dict, reviewed_by: str,
-                   reporter_employee_id: Optional[str] = None) -> dict:
-    """
-    Called once, right after a human approves or rejects (main.py's
-    /review route, after resume_incident() returns a terminal status).
-    Writes one document, merge=True so re-saving the same incident_id
-    (e.g. a retry) updates rather than duplicates.
-
-    state is the FULL orchestrator snapshot (get_incident_snapshot's
-    return value, not the trimmed _snapshot_response) — it must include
-    'transcript', which is preserved verbatim in original_transcript.
-    Every other free-text field is translated to English before storage;
-    category/severity/emergency/reporter_name are stored as-is.
-
-    reporter_employee_id: who filed the report, captured client-side at
-    the lightweight role gate (no real login yet — see Build Plan
-    Section 9, "known limits"). Kept separate from reporter_name, which
-    is the graph's own emergency-only field.
-    """
+def save_incident(
+    incident_id: str,
+    state: dict,
+    reviewed_by_employee_id: str,
+    reporter_employee_id: str,
+    site_id: str,
+) -> dict:
     client = get_client()
     routing = state.get("routing") or {}
     flat_fields = _flatten_fields(state.get("fields") or {})
 
-    to_translate = {k: flat_fields.get(k) for k in TRANSLATABLE_FIELDS}
-    translated = translate_fields_to_english(to_translate)
+    # Structured free-text values are normalized to English before storage.
+    translated = translate_fields_to_english({k: flat_fields.get(k) for k in TRANSLATABLE_FIELDS})
     flat_fields.update(translated)
 
     doc = {
         **flat_fields,
-        "original_transcript": state.get("transcript"),
+        "site_id": site_id,
+        "reporter_employee_id": reporter_employee_id,
+        "original_transcript": state.get("original_transcript"),
+        "english_transcript": state.get("transcript"),
         "status": state.get("status"),
         "routing_team": routing.get("team"),
         "routing_action": routing.get("action"),
         "routing_source": routing.get("routing_source"),
         "escalation": state.get("escalation"),
-        "reviewed_by": reviewed_by or "unknown",
+        "reviewed_by_employee_id": reviewed_by_employee_id,
         "reviewed_at": firestore.SERVER_TIMESTAMP,
-        "reporter_employee_id": reporter_employee_id,
     }
+
+    # Deliberately DO NOT persist reporter_name. It is emergency-only and is
+    # used transiently to construct the notification message.
+    doc.pop("reporter_name", None)
 
     client.collection(INCIDENTS_COLLECTION).document(incident_id).set(doc, merge=True)
     return doc
 
 
-def list_recent_incidents(limit: int = 20, reporter_employee_id: Optional[str] = None,
-                           anonymize: bool = False) -> list[dict]:
-    """For the history page and the worker's "My Reports" list. Newest
-    first. Returns plain dicts with the document id folded in as
-    'incident_id', ready to hand to the frontend as JSON.
-
-    reporter_employee_id: if given, only rows filed by that person are
-    returned. Filtered in Python after fetching (not a Firestore `where`)
-    so this doesn't require a composite index — fine at demo scale.
-
-    anonymize: strips reporter_employee_id and reviewed_by before
-    returning, for a worker-facing view of everyone else's incidents.
-    """
+def list_recent_incidents(
+    limit: int = 20,
+    reporter_employee_id: Optional[str] = None,
+    site_ids: Optional[list[str]] = None,
+) -> list[dict]:
     client = get_client()
-    fetch_limit = max(limit, 100) if reporter_employee_id else limit
-    query = (
-        client.collection(INCIDENTS_COLLECTION)
-        .order_by("reviewed_at", direction=firestore.Query.DESCENDING)
-        .limit(fetch_limit)
-    )
+    query = client.collection(INCIDENTS_COLLECTION).order_by(
+        "reviewed_at", direction=firestore.Query.DESCENDING
+    ).limit(max(limit, 100) if reporter_employee_id or site_ids else limit)
+
     results = []
     for snap in query.stream():
         row = snap.to_dict()
@@ -156,40 +100,29 @@ def list_recent_incidents(limit: int = 20, reporter_employee_id: Optional[str] =
 
     if reporter_employee_id:
         results = [r for r in results if r.get("reporter_employee_id") == reporter_employee_id]
-    results = results[:limit]
+    if site_ids:
+        allowed = set(site_ids)
+        results = [r for r in results if r.get("site_id") in allowed]
 
-    if anonymize:
-        for r in results:
-            r.pop("reporter_employee_id", None)
-            r.pop("reviewed_by", None)
-
-    return results
+    return results[:limit]
 
 
-def get_dashboard_summary() -> dict:
-    """Counts for the small dashboard: this calendar month, by severity,
-    by category, and approved vs rejected. Firestore has no SQL-style
-    GROUP BY, so this pulls this month's documents and counts in Python —
-    fine at demo scale (dozens to low hundreds of incidents), not meant
-    to scale to millions of rows."""
-    import datetime
-
+def get_dashboard_summary(site_ids: list[str]) -> dict:
     client = get_client()
     now = datetime.datetime.now(datetime.timezone.utc)
     month_start = datetime.datetime(now.year, now.month, 1, tzinfo=datetime.timezone.utc)
 
-    query = client.collection(INCIDENTS_COLLECTION).where(
-        "reviewed_at", ">=", month_start
-    )
+    query = client.collection(INCIDENTS_COLLECTION).where("reviewed_at", ">=", month_start)
+    allowed_sites = set(site_ids)
 
     by_severity: dict[str, int] = {}
     by_category: dict[str, int] = {}
-    approved = 0
-    rejected = 0
-    total = 0
+    approved = rejected = total = 0
 
     for snap in query.stream():
         row = snap.to_dict()
+        if allowed_sites and row.get("site_id") not in allowed_sites:
+            continue
         total += 1
         if row.get("status") == "complete":
             approved += 1

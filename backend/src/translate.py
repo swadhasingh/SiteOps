@@ -66,3 +66,45 @@ def translate_fields_to_english(values: dict) -> dict:
     except Exception as e:
         print(f"[translate] Translation failed, using original text instead: {e}")
         return values
+
+def translate_text_to_english(text: str) -> str:
+    """Translate the full worker transcript before AI processing.
+
+    This is intentionally strict: if translation fails, the incident should
+    not continue into extraction/verification on mixed-language text. The
+    original transcript remains separately available for audit/storage.
+    """
+    if not text or not text.strip():
+        raise ValueError("transcript cannot be empty")
+
+    prompt = (
+        "Translate this construction-site incident transcript into clear, "
+        "plain English. It may be English, Hindi, or Hinglish. Preserve every "
+        "material fact, number, location, injury, action, urgency signal, and "
+        "uncertainty. Do not summarize, add, or infer anything. Return ONLY "
+        "the translated transcript as plain text.\n\n"
+        f"TRANSCRIPT:\n{text}"
+    )
+
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is not configured for transcript translation")
+
+    try:
+        resp = requests.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        translated = resp.json()["choices"][0]["message"]["content"].strip()
+        if not translated:
+            raise RuntimeError("translation model returned an empty transcript")
+        return translated
+    except Exception as exc:
+        raise RuntimeError(f"transcript translation failed: {exc}") from exc

@@ -1,0 +1,58 @@
+{
+  "fields": {
+    "category": {
+      "type": "string",
+      "enum": ["safety_hazard", "material_damage", "equipment_issue", "delay", "quality_issue", "other"],
+      "description": "The general type of incident being reported",
+      "clarification_question": "What type of incident is this?",
+      "input_type": "choice",
+      "options": ["safety_hazard", "material_damage", "equipment_issue", "delay", "quality_issue", "other"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "description": "How serious the incident is, based on wording and consequences described",
+      "clarification_question": "How severe is the situation?",
+      "input_type": "choice",
+      "options": ["low", "medium", "high", "critical"]
+    },
+    "location": {
+      "type": "string",
+      "description": "Where on site the incident occurred, as stated in the transcript",
+      "clarification_question": "Where on site did this happen?",
+      "input_type": "text",
+      "options": null
+    },
+    "description": {
+      "type": "string",
+      "description": "A short factual summary of what happened, staying close to the transcript's own wording",
+      "clarification_question": "Can you briefly describe what happened?",
+      "input_type": "text",
+      "options": null
+    },
+    "action_needed": {
+      "type": "string",
+      "description": "What the speaker says should happen next, if stated",
+      "clarification_question": "Any Suggestions? (optional)",
+      "input_type": "text",
+      "options": null
+    },
+    "emergency": {
+      "type": "string",
+      "enum": ["yes", "no"],
+      "description": "Whether this requires immediate emergency attention — life-threatening danger, serious injury, active fire/collapse/electrocution risk — not just any incident, however serious-sounding",
+      "clarification_question": "Is this an emergency requiring immediate attention right now?",
+      "input_type": "choice",
+      "options": ["yes", "no"]
+    },
+    "reporter_name": {
+      "type": "string",
+      "description": "Name of the person reporting the incident. Collected only to prevent false emergency alarms before notifying management — never inferred from the transcript, always asked directly.",
+      "clarification_question": "What is your name, in case we need to follow up right away?",
+      "input_type": "text",
+      "options": null,
+      "never_extract": true,
+      "conditional_on": {"field": "emergency", "value": "yes"}
+    }
+  }
+}

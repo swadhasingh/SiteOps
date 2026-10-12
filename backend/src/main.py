@@ -1,90 +1,63 @@
-"""
-SiteOps Voice Agent — FastAPI entrypoint.
+"""SiteOps FastAPI API.
 
-Wraps the LangGraph orchestrator (src/langgraph_orchestrator.py) with
-HTTP routes. The graph itself stays the source of truth for an
-IN-PROGRESS incident (MemorySaver, in memory, lost on restart).
-Firestore only receives a finished incident, once /review reaches
-"complete" or "rejected".
-
-Two small in-memory registries support the lightweight worker/manager
-split in the frontend (NOT real authentication — see the note on
-ReviewRequest.reviewed_by and ProcessIncidentRequest.reporter_employee_id
-below):
-
-  _reporter_registry:  incident_id -> employee_id, so a saved record can
-                        say who filed it, and a worker's "My Reports"
-                        list can be filtered to just their own.
-  _pending_review_ids: the set of incident_ids currently paused at
-                        human_review, so a manager's dashboard can list
-                        "what needs a decision right now" without
-                        knowing incident ids in advance. LangGraph's
-                        MemorySaver doesn't expose "list every paused
-                        thread", so this set is maintained by hand,
-                        updated every time a route returns a snapshot.
-
-Also serves the frontend: static/index.html, mounted at "/" as the very
-last route below, so it never shadows the API routes.
+React is a separate Vite frontend. This service is API-only: Firebase
+Authentication verifies identity, Firestore user profiles provide RBAC/site
+authorization, and the existing LangGraph/agent pipeline does the incident
+work.
 """
 
 import os
+import requests
 
 from dotenv import load_dotenv
-load_dotenv()  # must run before firestore_store.get_client() is ever called,
-                # so GOOGLE_APPLICATION_CREDENTIALS and FIRESTORE_PROJECT_ID
-                # are set in os.environ.
+load_dotenv()
 
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
-from src.langgraph_orchestrator import build_incident_graph, start_incident, resume_incident, get_incident_snapshot
+from src.auth import CurrentUser, get_current_user, require_manager
+from src.langgraph_orchestrator import (
+    build_incident_graph,
+    start_incident,
+    resume_incident,
+    get_incident_snapshot,
+)
 from src.db import firestore_store
 
-app = FastAPI(title="SiteOps Voice Agent", version="0.5.0")
+app = FastAPI(title="SiteOps Voice Agent", version="1.0.0")
 
-# Live mode — makes real Groq calls, so Hinglish/English extraction
-# actually fills fields instead of leaving everything null. Requires a
-# real GROQ_API_KEY in .env. Flip back to live=False if Groq is
-# unreachable (e.g. blocked on the office network) or you want a demo
-# that never depends on a live API call succeeding.
+frontend_origin = os.environ.get("FRONTEND_ORIGIN", "http://localhost:8443")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[frontend_origin],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
 graph = build_incident_graph(provider="groq", live=True)
-
-# See module docstring — demo-scope only, reset on every server restart.
-_reporter_registry: dict[str, str] = {}
 _pending_review_ids: set[str] = set()
 
 
-# --- Request shapes -------------------------------------------------------
-
 class ProcessIncidentRequest(BaseModel):
-    incident_id: str
-    transcript: str
-    reporter_employee_id: str | None = None  # captured at the lightweight
-                                              # role gate, not part of the
-                                              # incident schema itself —
-                                              # never sent to the agents.
+    incident_id: str = Field(min_length=1)
+    transcript: str = Field(min_length=1)
+    site_id: str | None = None
 
 
 class ClarifyRequest(BaseModel):
     incident_id: str
-    answers: dict  # {"emergency": "yes"} or {"category": "...", "severity": "..."}
+    answers: dict
 
 
 class ReviewRequest(BaseModel):
     incident_id: str
-    decision: str  # "approve" | "edit" | "reject"
-    edits: dict | None = None       # only used when decision == "edit"
-    reviewed_by: str | None = None  # who made this decision — no login yet,
-                                     # so this is typed in by the reviewer.
-                                     # Only required (and only saved) on
-                                     # approve/reject, not on edit.
+    decision: str
+    edits: dict | None = None
 
-
-# --- Helpers ---------------------------------------------------------------
 
 def _snapshot_response(state: dict) -> dict:
-    """Same shape for every route, so the frontend always parses one format."""
     return {
         "incident_id": state.get("incident_id"),
         "status": state.get("status"),
@@ -93,6 +66,10 @@ def _snapshot_response(state: dict) -> dict:
         "escalation": state.get("escalation"),
         "is_paused": state.get("is_paused"),
         "pending_interrupt": state.get("pending_interrupt"),
+        "reporter_employee_id": state.get("reporter_employee_id"),
+        "site_id": state.get("site_id"),
+        "original_transcript": state.get("original_transcript"),
+        "english_transcript": state.get("transcript"),
     }
 
 
@@ -103,9 +80,23 @@ def _require_incident(incident_id: str) -> dict:
     return state
 
 
+def _assert_incident_access(state: dict, user: CurrentUser, *, manager_only: bool = False) -> None:
+    if manager_only and not user.is_manager:
+        raise HTTPException(status_code=403, detail="Manager access required")
+
+    if user.is_admin:
+        return
+
+    if user.is_manager:
+        if state.get("site_id") not in user.site_ids:
+            raise HTTPException(status_code=403, detail="You are not authorized for this site")
+        return
+
+    if state.get("reporter_employee_id") != user.employee_id:
+        raise HTTPException(status_code=403, detail="You can only access your own report")
+
+
 def _track_pending(state: dict) -> None:
-    """Keeps _pending_review_ids in sync with reality. Call this after
-    every start_incident/resume_incident, before returning a response."""
     incident_id = state.get("incident_id")
     if not incident_id:
         return
@@ -116,44 +107,91 @@ def _track_pending(state: dict) -> None:
         _pending_review_ids.discard(incident_id)
 
 
-# --- API routes --------------------------------------------------------
-
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
+@app.get("/auth/me")
+def auth_me(user: CurrentUser = Depends(get_current_user)):
+    return {
+        "uid": user.uid,
+        "employee_id": user.employee_id,
+        "role": user.role,
+        "site_ids": list(user.site_ids),
+        "email": user.email,
+    }
+
+
+@app.post("/transcribe")
+def transcribe(file: UploadFile = File(...), user: CurrentUser = Depends(get_current_user)):
+    """Convert browser audio to a raw transcript. Translation happens later
+    in start_incident, before extraction/verification/clarification."""
+    del user  # authentication is the authorization boundary for this endpoint
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Voice transcription is not configured")
+
+    audio = file.file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+    if len(audio) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio file is too large")
+
+    try:
+        response = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": (file.filename or "incident.webm", audio, file.content_type or "audio/webm")},
+            data={"model": "whisper-large-v3-turbo", "response_format": "json"},
+            timeout=90,
+        )
+        response.raise_for_status()
+        return {"transcript": response.json().get("text", "").strip()}
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Voice transcription failed: {exc}") from exc
+
+
 @app.post("/process-incident")
-def process_incident(req: ProcessIncidentRequest):
-    if not req.transcript or not req.transcript.strip():
-        raise HTTPException(status_code=400, detail="transcript cannot be empty")
-    if not req.incident_id or not req.incident_id.strip():
-        raise HTTPException(status_code=400, detail="incident_id cannot be empty")
+def process_incident(req: ProcessIncidentRequest, user: CurrentUser = Depends(get_current_user)):
+    site_id = req.site_id
+    if site_id is None:
+        if len(user.site_ids) != 1:
+            raise HTTPException(status_code=400, detail="site_id is required when the account has multiple sites")
+        site_id = user.site_ids[0]
+    if not user.is_admin and site_id not in user.site_ids:
+        raise HTTPException(status_code=403, detail="You are not authorized for this site")
 
-    if req.reporter_employee_id and req.reporter_employee_id.strip():
-        _reporter_registry[req.incident_id] = req.reporter_employee_id.strip()
+    try:
+        state = start_incident(
+            graph,
+            req.incident_id.strip(),
+            req.transcript.strip(),
+            reporter_employee_id=user.employee_id,
+            site_id=site_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    state = start_incident(graph, req.incident_id, req.transcript)
     _track_pending(state)
     return _snapshot_response(state)
 
 
 @app.post("/clarify")
-def clarify(req: ClarifyRequest):
+def clarify(req: ClarifyRequest, user: CurrentUser = Depends(get_current_user)):
     state = _require_incident(req.incident_id)
+    _assert_incident_access(state, user)
 
-    if not state.get("is_paused") or not state.get("pending_interrupt") or state["pending_interrupt"]["type"] != "clarification":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Incident '{req.incident_id}' is not waiting for a clarification answer right now."
-        )
+    pending = state.get("pending_interrupt")
+    if not state.get("is_paused") or not pending or pending.get("type") != "clarification":
+        raise HTTPException(status_code=400, detail="This incident is not waiting for clarification")
 
-    expected_fields = set(state["pending_interrupt"]["step"]["fields"])
+    expected_fields = set(pending["step"]["fields"])
     given_fields = set(req.answers.keys())
     if not expected_fields.issubset(given_fields):
         raise HTTPException(
             status_code=400,
-            detail=f"Expected answers for {sorted(expected_fields)}, got {sorted(given_fields)}"
+            detail=f"Expected answers for {sorted(expected_fields)}, got {sorted(given_fields)}",
         )
 
     new_state = resume_incident(graph, req.incident_id, req.answers)
@@ -162,63 +200,43 @@ def clarify(req: ClarifyRequest):
 
 
 @app.post("/review")
-def review(req: ReviewRequest):
+def review(req: ReviewRequest, user: CurrentUser = Depends(require_manager)):
     state = _require_incident(req.incident_id)
-
-    if not state.get("is_paused") or not state.get("pending_interrupt") or state["pending_interrupt"]["type"] != "human_review":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Incident '{req.incident_id}' is not waiting for a review decision right now."
-        )
+    _assert_incident_access(state, user, manager_only=True)
 
     if req.decision not in ("approve", "edit", "reject"):
         raise HTTPException(status_code=400, detail="decision must be 'approve', 'edit' or 'reject'")
     if req.decision == "edit" and not req.edits:
         raise HTTPException(status_code=400, detail="edits must be provided when decision is 'edit'")
-    if req.decision in ("approve", "reject") and not (req.reviewed_by and req.reviewed_by.strip()):
-        raise HTTPException(status_code=400, detail="reviewed_by is required to approve or reject")
 
     decision_payload = {"decision": req.decision, "edits": req.edits or {}}
     new_state = resume_incident(graph, req.incident_id, decision_payload)
     _track_pending(new_state)
-    response = _snapshot_response(new_state)
 
-    # Save to Firestore only once the incident reaches a terminal state.
-    # "edit" loops back to human_review (see orchestrator), so it never
-    # lands here — nothing is saved until approve or reject.
     if new_state.get("status") in ("complete", "rejected"):
         try:
             firestore_store.save_incident(
-                req.incident_id, new_state, req.reviewed_by,
-                reporter_employee_id=_reporter_registry.get(req.incident_id),
+                req.incident_id,
+                new_state,
+                reviewed_by_employee_id=user.employee_id,
+                reporter_employee_id=new_state.get("reporter_employee_id"),
+                site_id=new_state.get("site_id"),
             )
-        except Exception as e:
-            # The graph's decision already succeeded — don't lose that
-            # just because the database write failed. Report it clearly
-            # instead of pretending it saved (TC-DB-005's spirit).
-            raise HTTPException(
-                status_code=502,
-                detail=f"Decision recorded, but saving to the database failed: {e}"
-            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Decision recorded, but database save failed: {exc}") from exc
 
-    return response
+    return _snapshot_response(new_state)
 
 
 @app.get("/incident/{incident_id}")
-def get_incident(incident_id: str):
-    """Not in your original scope, but the frontend needs this: a way to
-    reload an incident's current state on page refresh, or for a manager
-    to open a specific pending item from the queue. Read-only, no side
-    effects. Only looks at the graph's in-progress state, not Firestore —
-    use /incidents for saved history."""
-    return _snapshot_response(_require_incident(incident_id))
+def get_incident(incident_id: str, user: CurrentUser = Depends(get_current_user)):
+    state = _require_incident(incident_id)
+    _assert_incident_access(state, user)
+    return _snapshot_response(state)
 
 
 @app.get("/pending-reviews")
-def pending_reviews():
-    """Manager dashboard: everything currently waiting for a decision,
-    across all incidents — not just one the caller already knows the id
-    of. Emergencies are sorted to the top."""
+def pending_reviews(user: CurrentUser = Depends(require_manager)):
     results = []
     for incident_id in list(_pending_review_ids):
         try:
@@ -226,10 +244,15 @@ def pending_reviews():
         except Exception:
             _pending_review_ids.discard(incident_id)
             continue
+
+        if state.get("site_id") not in user.site_ids and not user.is_admin:
+            continue
+
         pending = state.get("pending_interrupt")
         if not state.get("is_paused") or not pending or pending.get("type") != "human_review":
             _pending_review_ids.discard(incident_id)
             continue
+
         fields = state.get("fields") or {}
         results.append({
             "incident_id": incident_id,
@@ -237,39 +260,30 @@ def pending_reviews():
             "severity": (fields.get("severity") or {}).get("value"),
             "location": (fields.get("location") or {}).get("value"),
             "emergency": (fields.get("emergency") or {}).get("value"),
-            "reporter_employee_id": _reporter_registry.get(incident_id),
+            "reporter_employee_id": state.get("reporter_employee_id"),
+            "site_id": state.get("site_id"),
         })
-    results.sort(key=lambda r: r.get("emergency") != "yes")  # "yes" (emergencies) first
+
+    results.sort(key=lambda row: row.get("emergency") != "yes")
     return {"pending": results}
 
 
 @app.get("/incidents")
-def list_incidents(limit: int = 20, reporter_employee_id: str | None = None, anonymize: bool = False):
-    """History page (manager, full detail) and 'My Reports' (worker,
-    filtered to their own employee id). anonymize=true strips who filed
-    and who reviewed — used for a worker viewing incidents they didn't
-    file themselves."""
-    incidents = firestore_store.list_recent_incidents(
-        limit=limit, reporter_employee_id=reporter_employee_id, anonymize=anonymize
-    )
+def list_incidents(limit: int = 20, user: CurrentUser = Depends(get_current_user)):
+    limit = max(1, min(limit, 100))
+    if user.is_worker:
+        incidents = firestore_store.list_recent_incidents(
+            limit=limit,
+            reporter_employee_id=user.employee_id,
+        )
+    else:
+        incidents = firestore_store.list_recent_incidents(
+            limit=limit,
+            site_ids=list(user.site_ids),
+        )
     return {"incidents": incidents}
 
 
 @app.get("/dashboard-summary")
-def dashboard_summary():
-    """Manager dashboard: this month's counts by severity/category and
-    approved-vs-rejected totals."""
-    return firestore_store.get_dashboard_summary()
-
-
-# --- Frontend ------------------------------------------------------------
-# Must be the LAST route registered. StaticFiles(html=True) serves
-# static/index.html for "/" and any unmatched path, so if this were
-# mounted earlier it would swallow requests meant for the API routes above.
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("src.main:app", host="0.0.0.0", port=port, reload=True)
+def dashboard_summary(user: CurrentUser = Depends(require_manager)):
+    return firestore_store.get_dashboard_summary(list(user.site_ids))

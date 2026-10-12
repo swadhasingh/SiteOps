@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
 import siteOpsLogo from "./imports/siteops-logo.png"
+import { useAuth, type Role } from "./auth/AuthProvider"
 
 type Screen = "dashboard" | "report" | "incidents" | "queue" | "review" | "analytics" | "settings"
-
-type Role = "manager" | "worker"
 type Tone = "teal" | "coral" | "amber" | "green" | "danger" | "neutral"
 
 const incidents = [
@@ -218,7 +217,7 @@ function Sidebar({
     { label: "Report incident", screen: "report", icon: "mic" },
     { label: "My incidents", screen: "incidents", icon: "list" },
   ]
-  const items = role === "manager" ? managerItems : workerItems
+  const items = role === "worker" ? workerItems : managerItems
 
   return (
     <>
@@ -240,12 +239,12 @@ function Sidebar({
         </div>
         <div className="workspace-identity">
           <span className="workspace-identity__icon">
-            <Icon name={role === "manager" ? "shield" : "user"} />
+            <Icon name={role === "worker" ? "user" : "shield"} />
           </span>
           <span>
             <small>Authenticated workspace</small>
             <strong>
-              {role === "manager" ? "Manager access" : "Worker access"}
+              {role === "admin" ? "Admin access" : role === "manager" ? "Manager access" : "Worker access"}
             </strong>
           </span>
           <Icon name="check" size={14} />
@@ -299,10 +298,12 @@ function Sidebar({
 
 function Topbar({
   role,
+  employeeId,
   onMenu,
   onReport,
 }: {
   role: Role
+  employeeId: string
   onMenu: () => void
   onReport: () => void
 }) {
@@ -342,14 +343,10 @@ function Topbar({
           <span />
         </button>
         <button className="profile-button" type="button">
-          <span className="avatar">{role === "manager" ? "AD" : "MR"}</span>
+          <span className="avatar">{role === "worker" ? "WO" : role === "admin" ? "AD" : "MG"}</span>
           <span className="profile-copy">
-            <strong>
-              {role === "manager" ? "Alex Dawson" : "Marcus Reed"}
-            </strong>
-            <small>
-              {role === "manager" ? "Site manager" : "Field operative"}
-            </small>
+            <strong>{employeeId}</strong>
+            <small>{role === "worker" ? "Field operative" : role === "admin" ? "Administrator" : "Site manager"}</small>
           </span>
           <Icon name="chevron" size={14} />
         </button>
@@ -1384,29 +1381,38 @@ function Settings() {
   )
 }
 
-function LoginScreen({ onLogin }: { onLogin: (role: Role) => void }) {
+function LoginScreen({
+  onLogin,
+  initialError = "",
+}: {
+  onLogin: (email: string, password: string) => Promise<void>
+  initialError?: string
+}) {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState(initialError)
 
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    setError(initialError)
+  }, [initialError])
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!username.trim() || password.length < 4) {
-      setError("Enter your username and a password of at least 4 characters.")
+    if (!username.trim() || !password) {
+      setError("Enter your SiteOps email and password.")
       return
     }
 
     setError("")
     setSubmitting(true)
-    window.setTimeout(() => {
-      const normalized = username.trim().toLowerCase()
-      onLogin(
-        normalized.includes("worker") || normalized.includes("operative")
-          ? "worker"
-          : "manager",
-      )
-    }, 650)
+    try {
+      await onLogin(username.trim(), password)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign in")
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -1458,18 +1464,19 @@ function LoginScreen({ onLogin }: { onLogin: (role: Role) => void }) {
             </span>
             <span className="eyebrow">Secure access</span>
             <h2>Welcome to SiteOps</h2>
-            <p>Sign in with your assigned project credentials.</p>
+            <p>Sign in with your assigned Firebase/SiteOps credentials.</p>
           </div>
           <form onSubmit={submit}>
             <label htmlFor="username">
-              Username
+              Email
               <span className="login-input">
                 <Icon name="user" />
                 <input
                   autoComplete="username"
                   id="username"
                   onChange={(event) => setUsername(event.target.value)}
-                  placeholder="Enter your username"
+                  placeholder="you@company.com"
+                  type="email"
                   value={username}
                 />
               </span>
@@ -1508,29 +1515,9 @@ function LoginScreen({ onLogin }: { onLogin: (role: Role) => void }) {
             <Icon name="shield" />
             <span>
               <strong>Role-based access enabled</strong>
-              Your account automatically opens the correct workspace.
+              Your Firebase account determines your SiteOps role. Workers and
+              managers do not choose their role on this screen.
             </span>
-          </div>
-          <div className="demo-access">
-            <span>Demo access</span>
-            <button
-              onClick={() => {
-                setUsername("manager.demo")
-                setPassword("siteops")
-              }}
-              type="button"
-            >
-              Manager
-            </button>
-            <button
-              onClick={() => {
-                setUsername("worker.demo")
-                setPassword("siteops")
-              }}
-              type="button"
-            >
-              Worker
-            </button>
           </div>
         </div>
         <p className="login-support">
@@ -1542,10 +1529,17 @@ function LoginScreen({ onLogin }: { onLogin: (role: Role) => void }) {
 }
 
 export default function App() {
-  const [role, setRole] = useState<Role | null>(null)
+  const { user, profile, loading, error: authError, signIn, signOutUser } = useAuth()
   const [screen, setScreen] = useState<Screen>("dashboard")
   const [mobileOpen, setMobileOpen] = useState(false)
   const [toast, setToast] = useState("")
+
+  const role = profile?.role ?? null
+
+  useEffect(() => {
+    if (!role) return
+    setScreen(role === "worker" ? "report" : "dashboard")
+  }, [role])
 
   const showToast = (message: string) => {
     setToast(message)
@@ -1553,6 +1547,8 @@ export default function App() {
   }
 
   const navigate = (next: Screen) => {
+    if (!role) return
+
     if (
       role === "worker" &&
       ["dashboard", "queue", "review", "analytics"].includes(next)
@@ -1561,22 +1557,19 @@ export default function App() {
       showToast("This area requires manager access")
       return
     }
+
     setScreen(next)
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  const login = (next: Role) => {
-    setRole(next)
-    setScreen(next === "manager" ? "dashboard" : "report")
-  }
-
-  const logout = () => {
-    setRole(null)
+  const logout = async () => {
+    await signOutUser()
     setScreen("dashboard")
     setMobileOpen(false)
   }
 
   const content = useMemo(() => {
+    if (!role) return null
     if (screen === "dashboard") return <Dashboard onNavigate={navigate} />
     if (screen === "report") return <ReportScreen showToast={showToast} />
     if (screen === "incidents")
@@ -1588,7 +1581,26 @@ export default function App() {
     return <Settings />
   }, [screen, role])
 
-  if (!role) return <LoginScreen onLogin={login} />
+  if (loading) {
+    return (
+      <main className="login-screen">
+        <section className="login-access">
+          <div className="login-card">
+            <div className="login-card__header">
+              <span className="access-icon"><Icon name="shield" /></span>
+              <span className="eyebrow">Secure access</span>
+              <h2>Loading SiteOps</h2>
+              <p>Checking your Firebase account and SiteOps permissions.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (!user || !profile) {
+    return <LoginScreen onLogin={signIn} initialError={authError} />
+  }
 
   return (
     <div className="app-shell">
@@ -1602,6 +1614,7 @@ export default function App() {
       />
       <div className="app-main">
         <Topbar
+          employeeId={profile.employee_id}
           onMenu={() => setMobileOpen(true)}
           onReport={() => navigate("report")}
           role={role}
@@ -1629,3 +1642,4 @@ export default function App() {
     </div>
   )
 }
+

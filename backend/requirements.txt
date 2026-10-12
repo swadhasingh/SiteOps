@@ -7,5 +7,9 @@ python-dotenv==1.0.1
 # psycopg2-binary==2.9.9
 # jsonschema==4.23.0
 # pandas==2.2.3
-requests==2.32.3             # used now, by the Clarification Agent (Step 6) to call Gemini
+requests==2.32.3
+firebase-admin>=6.0,<8.0
+google-cloud-firestore>=2.0,<3.0             # used now, by the Clarification Agent (Step 6) to call Gemini
 # faster-whisper==1.0.3      # only if going local-ASR route, Step 10
+
+python-multipart==0.0.20
